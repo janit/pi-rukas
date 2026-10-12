@@ -99,7 +99,9 @@ export interface IntegrateWorktreeCreation {
  */
 export async function ensureIntegrateWorktree(
   execFn: ExecFn,
-  opts: { repoRoot: string; issue: number; branchName: string; baseSha: string },
+  opts: { repoRoot: string; issue: number; branchName: string; baseSha: string } & {
+    cycleWorktrees?: string[];
+  },
   stateFile?: string,
 ): Promise<IntegrateWorktreeCreation> {
   const { repoRoot, issue, branchName, baseSha } = opts;
@@ -255,7 +257,8 @@ export async function ensureIntegrateWorktree(
   // refuses a foreign same-issue leftover. The driver-owned tree's OWN path
   // is in the in-cycle set: it is already handled above (nothing to
   // pre-remove), and the guard's own `git worktree add` "already exists"
-  // error remains the signal for a clean in-cycle path.
+  // error remains the signal for a clean in-cycle path. `cycleWorktrees`
+  // join the set: they hold the developers' commits BY DESIGN, not a leftover.
   await runCreateGuards(
     execFn,
     {
@@ -264,7 +267,7 @@ export async function ensureIntegrateWorktree(
       fromRef: branchHead ?? baseSha,
       callerVerifiedTargetAbsent: true,
     },
-    [abs],
+    [abs, ...(opts.cycleWorktrees ?? [])],
   );
 
   const ref = branchHead ?? baseSha;
