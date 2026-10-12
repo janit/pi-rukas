@@ -45,6 +45,7 @@ import {
 import { buildCompletionEvent } from "./work-driver-merged.ts";
 import { armStepNotice } from "./work-driver-step-notice.ts";
 import { verifyTimeoutMs } from "./work-driver-verify-develop-helpers.ts";
+import { driverGateCmd } from "./work-driver-verify-pr17.ts";
 import { type WorkEvent, type WorkState, appendEvent } from "./workflow-state.ts";
 export { capKillOutcomeFields };
 
@@ -176,6 +177,9 @@ export async function fanOutAdversarial(
           // not just against generic code quality. Absent on cycles resumed
           // from older state files, which degrade to the previous behaviour.
           issueBody: state.pipelineState.issueBodyArtifact,
+          // The develop gate (or the fix pass's) passed this command on this
+          // tree to get here; the reviewer must not spend a gate re-proving it.
+          gateCmd: await driverGateCmd(ctx.repoRoot),
           // #799 — the slow-run recorder collects into the driver's pending
           // buffer (keyed by this cycle's primary issue); the step boundary
           // (routeStepOutcome) drains it — the fan-out folds nothing of its
