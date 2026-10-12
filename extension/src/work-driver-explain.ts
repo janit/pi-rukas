@@ -8,6 +8,7 @@
 import { developVerdictLines } from "./work-develop-verdict-source.ts";
 import { commitPrRootBlurb } from "./work-driver-commit-inspect.ts";
 import { MAX_CI_RETRIES, MAX_REVIEW_ROUNDS } from "./work-driver-context.ts";
+import { HOST_EXHAUSTION_LABEL, isHostExhaustionFailure } from "./work-driver-exec-error.ts";
 import { explainConsolidation } from "./work-driver-explain-consolidation.ts";
 import { explainDetectCaps } from "./work-driver-explain-detect-caps.ts";
 import { explainLens } from "./work-driver-explain-lens.ts";
@@ -340,6 +341,11 @@ export function explainCap(
       retryNote = evidence.recovered
         ? `\nNote: the verify command was ${verb} and RECOVERED — the recorded failure was a transient flake; inspect the worktree(s) to confirm nothing else changed.`
         : `\nNote: the verify command was ${verb} and still failed — this is a real failure, not a flake.`;
+    }
+    // A check the host could not fork did not judge the change; "inspect the
+    // worktree(s), fix" would send the operator to code nobody executed.
+    if (evidence?.failures.some(isHostExhaustionFailure)) {
+      return `the driver's outcome-verification gate could not run on the ${step} step — the host refused to start a process (fork failed / EAGAIN):${findings}${retryNote}${logLine}\nThe entries marked ${HOST_EXHAUSTION_LABEL} are environment failures, not defects in the change: those checks never executed. Free processes on the host (or raise its pid limit), then re-run the cycle`;
     }
     return `the driver's outcome-verification gate rejected the ${step} step's "done" claim — the claimed result is not backed by executed evidence:${findings}${retryNote}${logLine}\nNo LLM judged this; the driver ran the checks itself (git diff/rev-list, the project's verify command, gh pr view). Inspect the worktree(s), fix or re-dispatch, and re-run. Set PI_ENSEMBLE_VERIFY=0 to disable the gate (not recommended)`;
   }
