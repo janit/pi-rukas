@@ -7,17 +7,18 @@
  * post-dispatch safety gate.
  */
 
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import type { CommentEvidence } from "./comment-evidence.ts";
+import { execTree } from "./exec-tree.ts";
 import type { DriverContext } from "./work-driver-context.ts";
 import { forgeForCycle } from "./work-driver-forge-ctx.ts";
 import { detectMainline } from "./work-driver-git.ts";
 import type { FenceViolationRecord } from "./work-driver-scope-fence.ts";
+import { verifyCmdFor } from "./work-driver-verify-cmd.ts";
 import { verifyDevelopOutcome } from "./work-driver-verify-develop.ts";
 import type { WorkState } from "./workflow-state.ts";
 
-const execp = promisify(exec);
+// Tree-killing: the develop gate runs the project's verify and smoke commands.
+const execp = execTree;
 
 /**
  * PR17 — Driver-side outcome verification gate.
@@ -56,6 +57,17 @@ const execp = promisify(exec);
 function verifyGateEnabled(): boolean {
   const v = process.env.PI_ENSEMBLE_VERIFY;
   return v !== "0" && v !== "false";
+}
+
+/**
+ * The command the driver's own gates run — after develop, after every
+ * adversarial fix pass, and on the consolidated tree at commit-pr — or
+ * undefined when the gate is disabled or the project has no command. The
+ * adversarial reviewer is told the driver owns this command so it does not
+ * spend a whole gate's wall-clock re-proving a result the driver already has.
+ */
+export async function driverGateCmd(repoRoot: string): Promise<string | undefined> {
+  return verifyGateEnabled() ? verifyCmdFor(repoRoot) : undefined;
 }
 
 /** The fields of the forge `prView` result this gate reads. */
