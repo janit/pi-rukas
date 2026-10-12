@@ -17,6 +17,7 @@ import { explainReview } from "./work-driver-explain-review.ts";
 import { cherryPickRecoveryFor } from "./work-driver-handoff-cherry-pick.ts";
 import { type ParkReason, explainPark } from "./work-driver-intent.ts";
 import { explainMergeHold } from "./work-driver-merge-authority.ts";
+import { BASELINE_RED_MARKER } from "./work-driver-verify-baseline.ts";
 import { lastCapHit } from "./workflow-state-cap.ts";
 import {
   type WorkEvent,
@@ -339,7 +340,12 @@ export function explainCap(
         ? `\nNote: the verify command was ${verb} and RECOVERED — the recorded failure was a transient flake; inspect the worktree(s) to confirm nothing else changed.`
         : `\nNote: the verify command was ${verb} and still failed — this is a real failure, not a flake.`;
     }
-    return `the driver's outcome-verification gate rejected the ${step} step's "done" claim — the claimed result is not backed by executed evidence:${findings}${retryNote}${logLine}\nNo LLM judged this; the driver ran the checks itself (git diff/rev-list, the project's verify command, gh pr view). Inspect the worktree(s), fix or re-dispatch, and re-run. Set PI_ENSEMBLE_VERIFY=0 to disable the gate (not recommended)`;
+    // A red baseline is not the change's failure: sending the operator to
+    // the worktree is advice to inspect code that was never the problem.
+    const advice = evidence?.failures.some((f) => f.startsWith(BASELINE_RED_MARKER))
+      ? "The verify command already fails at the cycle's base commit — fix the gate there (or the host it runs on) before inspecting the worktree(s), then re-run."
+      : "Inspect the worktree(s), fix or re-dispatch, and re-run.";
+    return `the driver's outcome-verification gate rejected the ${step} step's "done" claim — the claimed result is not backed by executed evidence:${findings}${retryNote}${logLine}\nNo LLM judged this; the driver ran the checks itself (git diff/rev-list, the project's verify command, gh pr view). ${advice} Set PI_ENSEMBLE_VERIFY=0 to disable the gate (not recommended)`;
   }
   // #753 — deferred worktree-creation failure. Its own sentence, because
   // `step-failed:develop` would be a mislabel (the dispatch itself never

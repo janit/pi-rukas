@@ -27,6 +27,7 @@ import type { DriverContext } from "./work-driver-context.ts";
 import { provisionDepsHint } from "./work-driver-deps-hint.ts";
 import { extractAttributedTail } from "./work-driver-exec-error.ts";
 import type { FenceViolationRecord } from "./work-driver-scope-fence.ts";
+import { baselineRedMessage, probeBaselineVerify } from "./work-driver-verify-baseline.ts";
 import { verifyCmdFor } from "./work-driver-verify-cmd.ts";
 import { formatExecError, verifyTimeoutMs } from "./work-driver-verify-develop-helpers.ts";
 import { rawOutputClause } from "./work-driver-verify-flake.ts";
@@ -350,7 +351,16 @@ export async function runVerifyCommandGate(opts: {
     // #841 — the shared rawOutputClause helper (single home for the
     // sentence so both verify seams render identically).
     const logClause = rawOutputClause(cons.logPath);
-    failures.push(consolidatedFailureMessage(verdict, cmd) + logClause);
+    // A run KILLED at the bound never reached a verdict: its stream stops
+    // wherever the kill landed, and classifying that reported a timeout as
+    // "specific assertion: (no specific assertion could be extracted)" — a
+    // claim about the code. Report the bound instead, as the per-worktree
+    // run above already does.
+    failures.push(
+      (cons.timedOut === true
+        ? `verify command \`${cmd}\` exceeded its ${Math.round(verifyTimeoutMs() / 60000)}-min timeout on the CONSOLIDATED tree at ${ctx.repoRoot} — the run was killed at the bound (PI_ENSEMBLE_VERIFY_TIMEOUT_MS), so it reached no verdict about the code.`
+        : consolidatedFailureMessage(verdict, cmd)) + logClause,
+    );
     // #841 — thread the ACTUAL written log path back (the write's own
     // return — undefined when the write failed, in which case there is
     // nothing to record structurally).
@@ -416,6 +426,37 @@ export async function runVerifyCommandGate(opts: {
     for (const f of perWorktreeVerifyFailures) {
       notes.push(
         `per-worktree verify (evidence; still a failure — the consolidated pass does not excuse a per-worktree defect, #1005) — ${f}`,
+      );
+    }
+  }
+  // Baseline comparison — ONLY once the verify command has already failed
+  // (never on the happy path: it costs a full gate run). A command that
+  // also fails on a clean checkout of the base commit was red before the
+  // change existed; the cycle still parks, but the evidence leads with that
+  // instead of blaming the diff. See work-driver-verify-baseline.ts.
+  if (cons.status === "failed" || perWorktreeVerifyFailures.length > 0) {
+    const base = baseSha as string;
+    const timeoutMs = verifyTimeoutMs();
+    const verdict = await probeBaselineVerify(execFn, {
+      repoRoot: ctx.repoRoot,
+      baseSha: base,
+      issue: ctx.issue,
+      cmd,
+      timeoutMs,
+    });
+    if (verdict.status === "red") {
+      const changeFailure = [
+        cons.status === "failed" ? (cons.rawFailure ?? "") : "",
+        ...perWorktreeVerifyFailures,
+      ].join("\n");
+      failures.unshift(
+        baselineRedMessage(verdict, { cmd, baseSha: base, timeoutMs, changeFailure }),
+      );
+    } else {
+      notes.push(
+        verdict.status === "green"
+          ? `baseline verify passed — \`${cmd}\` exits 0 on a clean checkout of the base commit ${base.slice(0, 12)}, so the gate was green before this change`
+          : `baseline verify not established — ${verdict.reason}`,
       );
     }
   }
