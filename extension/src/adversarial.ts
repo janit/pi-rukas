@@ -266,11 +266,17 @@ export async function runAdversarialLoop(
       ...(params.pi ? { pi: params.pi } : {}),
       onRawEvent: slowRaw,
     });
+    // This child's own abort, so dispatch_kill <deckKey> can stop a hung
+    // round — the driver passes a loop signal that nothing ever aborts.
+    const kill = new AbortController();
+    const onLoopAbort = () => kill.abort();
+    if (signal.aborted) kill.abort();
+    else signal.addEventListener("abort", onLoopAbort, { once: true });
     try {
       return await spawnSpecialist(
         { role, prompt, cwd },
         {
-          signal,
+          signal: kill.signal,
           runId,
           tag,
           onProgress: (state) => {
@@ -289,11 +295,12 @@ export async function runAdversarialLoop(
               stdin,
             });
             // #799 — also registered under the deck key (steer from the peek id).
-            registerChildHandle(deckKey, stdin, label, role);
+            registerChildHandle(deckKey, stdin, label, role, () => kill.abort());
           },
         },
       );
     } finally {
+      signal.removeEventListener("abort", onLoopAbort);
       stopSlow.stop();
       dispatchDeck.clearEntry(deckKey);
       childHandles.delete(deckKey);
