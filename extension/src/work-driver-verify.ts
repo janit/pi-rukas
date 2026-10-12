@@ -12,9 +12,10 @@
  *   - commit-pr branch + verifyConsolidation remain here.
  */
 
-import { exec, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { promisify } from "node:util";
+import { execTree } from "./exec-tree.ts";
 import { trace } from "./trace.ts";
 import type { DriverContext } from "./work-driver-context.ts";
 import { detectMainline } from "./work-driver-git.ts";
@@ -35,7 +36,7 @@ const execFileP = promisify(execFile);
  * arguments, via `execFile` (no shell re-parse) — this is how the coupling
  * merge's rule-3 grep passes planner-controlled paths verbatim, so a path
  * containing `$(…)`, backticks or `;` is data, never a shell command. When
- * `opts.argv` is absent the classic shell path (promisify(exec)) runs.
+ * `opts.argv` is absent the classic shell path (`execTree`) runs.
  */
 export async function execp(
   cmd: string,
@@ -71,7 +72,9 @@ export async function execp(
       stderr: rest.encoding === "buffer" ? undefined : ((r.stderr as string) ?? undefined),
     };
   }
-  const { stdout, stderr } = await promisify(exec)(cmd, {
+  // Tree-killing (exec-tree.ts): this is what runs the project's verify
+  // command, and a gate killed at its timeout must not leave its children.
+  const { stdout, stderr } = await execTree(cmd, {
     cwd: rest.cwd,
     timeout: rest.timeout,
     maxBuffer: rest.maxBuffer,

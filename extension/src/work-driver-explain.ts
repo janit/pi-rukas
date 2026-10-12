@@ -8,6 +8,7 @@
 import { developVerdictLines } from "./work-develop-verdict-source.ts";
 import { commitPrRootBlurb } from "./work-driver-commit-inspect.ts";
 import { MAX_CI_RETRIES, MAX_REVIEW_ROUNDS } from "./work-driver-context.ts";
+import { HOST_EXHAUSTION_LABEL, isHostExhaustionFailure } from "./work-driver-exec-error.ts";
 import { explainConsolidation } from "./work-driver-explain-consolidation.ts";
 import { explainDetectCaps } from "./work-driver-explain-detect-caps.ts";
 import { explainLens } from "./work-driver-explain-lens.ts";
@@ -48,7 +49,9 @@ export function explainCap(
     return "the cycle halted without recording which gate stopped it — check the event log directly";
   }
   const snap = state.pipelineState.handoffSnapshot;
-  const fileCount = snap ? snap.unstagedCount + snap.stagedCount : undefined;
+  // A snapshot with failed reads is not a count (`handoffSnapshot.unreadable`).
+  const fileCount =
+    snap && !snap.unreadable?.length ? snap.unstagedCount + snap.stagedCount : undefined;
   const fileBlurb =
     fileCount !== undefined ? `${fileCount} file(s) modified-but-uncommitted` : "uncommitted work";
   switch (cap) {
@@ -340,8 +343,11 @@ export function explainCap(
         ? `\nNote: the verify command was ${verb} and RECOVERED — the recorded failure was a transient flake; inspect the worktree(s) to confirm nothing else changed.`
         : `\nNote: the verify command was ${verb} and still failed — this is a real failure, not a flake.`;
     }
-    // A red baseline is not the change's failure: sending the operator to
-    // the worktree is advice to inspect code that was never the problem.
+    // Neither a check the host could not fork nor a gate already red at the
+    // base judged the change: "inspect the worktree(s)" would be wrong advice.
+    if (evidence?.failures.some(isHostExhaustionFailure)) {
+      return `the driver's outcome-verification gate could not run on the ${step} step — the host refused to start a process (fork failed / EAGAIN):${findings}${retryNote}${logLine}\nThe entries marked ${HOST_EXHAUSTION_LABEL} are environment failures, not defects in the change: those checks never executed. Free processes on the host (or raise its pid limit), then re-run the cycle`;
+    }
     const advice = evidence?.failures.some((f) => f.startsWith(BASELINE_RED_MARKER))
       ? "The verify command already fails at the cycle's base commit — fix the gate there (or the host it runs on) before inspecting the worktree(s), then re-run."
       : "Inspect the worktree(s), fix or re-dispatch, and re-run.";

@@ -222,6 +222,8 @@ That number separates two failures a bare cause could not:
 
 **A child hung inside one tool call** shows in `dispatch_peek` as `no new turn for <duration>` next to its wall-clock age. A steer cannot reach it — a steer lands only when the current tool call returns — so the action is `dispatch_kill <id>` with the id the peek row or the `[ensemble:slow]` notice printed; that works for adversarial round and lens children (`<run>/<label>`) too, and the waiting step then sees a failed dispatch. Steers no longer postpone the tool-inactivity kill: Pi acknowledges each one on stdout, and those acknowledgements used to count as output, so a child steered at every slow-run level outlived the 60-minute bound.
 
+**`dispatch_kill` answered `Refused`** — the job belongs to a running `/work` driver cycle, which `dispatch_status`, `dispatch_peek` and the `[ensemble:slow]` notice now mark as `owned by the /work driver, not you`. The PM tool kills such a child only with `force: true` (for a hung one; the driver then sees a failed dispatch), and never kills the cycle's own `work-driver` job, whose abort stops nothing. The agent-list `x` is not gated. A PM `dispatch_specialist` / `dispatch_parallel` of `developer` or `ops` with a `cwd` inside `.worktrees/issue-<N>-*` is refused while the cycle for #N is live in that session; `explore` and the reviewer roles are let through, and so is everything once the cycle has ended.
+
 The 30-minute model-silence budget (and the 60-minute tool-inactivity bound) are deliberately sized for the silence shape each owns: model turns at the model-silence budget, long tool executions at the tool-inactivity bound. Raising a wall-clock number to cover a cause you have not identified is exactly the mistake the six per-role timers were deleted for — each was raised twice, and each time the finding was that the number was too small for a *healthy* child.
 
 ### Reading a handoff
@@ -1009,6 +1011,10 @@ It used to continue. The failure was recorded in `plumbReports` rather than the 
 
 **The fix may still be on disk.** Check `git -C .worktrees/issue-<N>-<id> status` before re-running — the developer's work is usually there, uncommitted.
 
+### A second `commit-pr` after `lens-fix`, then `integration-worktree-violation` and a non-fast-forward push
+
+Symptom: after `lens-fix` and a long re-review the driver ran `commit-pr` again instead of `lens-review`, logged `integrate worktree creation failed … refusing to force-remove existing worktree …/issue-<N>-default — it holds unrecoverable work: (unpushed commits: N)` and `! [rejected] … (non-fast-forward)`, and parked. Two causes, both fixed: a `dispatch-slow` event (any dispatch past the slow-run threshold) was appended after the step's verdict, and the driver routes on the last event — so the approval was shadowed and the cycle fell through to `commit-pr`; and the fallback's integrate worktree treated the cycle's own workstream tree as a foreign leftover. On an older build the work is intact in `.worktrees/issue-<N>-<id>` (detached HEAD) — cherry-pick it onto the branch.
+
 ### `integration-verify-failed` — the consolidated tree does not build
 
 `commit-pr` runs the project's `.pi/verify-cmd` against the **integrated** tree, between the commit and the push. Everything upstream saw one workstream in isolation: the develop gate ran inside a single worktree and adversarial reviewed a single worktree's diff. Two workstreams that each pass alone can still fail together — one renames or deletes what another still refers to — and that defect is *created* by integration, so integration is the only place it can be caught.
@@ -1335,6 +1341,8 @@ Before #398, `intent-park` had no branch in either renderer and inherited a bloc
 
 Recovery commands are also **never chained**. They arrive in the Pi chat, and the permission matcher cannot wildcard a chained shape, so every unique `a && b` re-prompts you. One command per line.
 
+**`WORKTREE STATE NOT READ` means the handoff could not run `git`, not that the cycle produced nothing.** Developers commit on detached-HEAD worktrees by design, so a cycle's commits are reachable from no branch until commit-pr integrates them. When the host cannot start a process at handoff time (`/bin/sh: Cannot fork`, `spawn EAGAIN` — a container at its pid limit), every read fails; the handoff used to print those failures as `no committed work ahead of the base`, `(no branch was created)` and `0 file(s) modified` over a worktree holding reviewed commits. It now lists the failed reads and, per recorded worktree, the two commands to run once `git` works again: `git -C <worktree> log --oneline <base>..HEAD` to see the commits, `git -C <worktree> branch <branch> HEAD` to attach them. The numbered options under it still assume a readable repository — check the worktree first. The pid exhaustion itself is the host's to fix.
+
 ### Merge authority — why `/work` opened a PR and stopped
 
 **`/work` will not merge unless something explicitly permitted it to.** That is the default, and the absence of a prohibition is not permission.
@@ -1606,6 +1614,14 @@ After the `develop` step (when every branch claims success) and after the `commi
 - At least one worktree has a real diff — uncommitted porcelain entries, or commits ahead of the `baseSha` recorded at the branch step. All worktrees empty = the claim was hollow.
 - The project's **verify command** exits 0 in each changed worktree.
 
+#### `[host-resource-exhaustion]`: the gate could not run
+
+**Symptom:** The develop step ends with `verify-failed:develop` and the evidence lines start with `[host-resource-exhaustion]`, quoting `/bin/sh: 1: Cannot fork`, `fork: retry: Resource temporarily unavailable` or `spawn … EAGAIN`.
+
+**Cause:** The host (or the container's pid limit) had no room to start a process, so the driver's git / verify / smoke commands never executed. This is an environment failure, not a verdict on the change — the gate still fails, because an unrun gate is not a pass, but nothing was learned about the diff. Before this label existed the same condition was reported as `[needs-human-decision] … (no specific assertion could be extracted)`, or as `consolidated-verify-conflict` ("two workstreams edited the same lines") even on a single-workstream cycle.
+
+**Fix:** Free processes on the host or raise its pid/thread limit, then re-run the cycle. Do not start by inspecting the diff: it has not been judged either way.
+
 #### Scope fan-out: the developer changed too many files
 
 **Symptom:** The develop step ends with `verify-failed:develop` even though the developer reported success. The handoff evidence names an out-of-scope path, or says that the workstream changed more files than its plan declared.
@@ -1677,6 +1693,14 @@ If the smoke command exits non-zero, the gate fails with a `smoke:`-prefixed fai
 **Why this exists:** A test suite passing in isolation doesn't prove the product works. vipune's failure mode was tests passing while the broken feature never executed; a smoke command forces a basic end-to-end path through the real artifact.
 
 **Escape hatches:** `PI_ENSEMBLE_SMOKE=0` disables the smoke gate; remove `.pi/smoke-cmd` to omit the smoke test from verification.
+
+#### `fork: Resource temporarily unavailable` after a gate timed out
+
+**A timed-out gate no longer leaves its children running.** The driver's verify, smoke and `verify-cmd-full` runs used `child_process.exec`, whose timeout signals the shell alone — the test runner and everything under it kept running, holding pids and the worktree for the rest of the cycle. They now run in their own process group and the whole group gets SIGTERM at the timeout, then SIGKILL 5 s later (`extension/src/exec-tree.ts`). A command that leaves its group on purpose (`setsid`, GNU `timeout` without `--foreground`) is out of reach; the driver no longer waits on it, but it is not killed.
+
+**Killing a tree does not reap it — that needs an init.** If `pi` is PID 1 of its container, every orphaned process is reparented to it and stays a zombie when it exits, because node only waits for children it spawned itself. Measured on `node:22-alpine`: 20 orphans killed under node-as-PID-1 leave 20 zombies; under `docker run --init`, none. Zombies count against the cgroup's `pids.max`, so the symptom is `pids.current` at the limit with a near-zero load average, and every later command failing to fork. Run the container with `--init` (or another reaper as PID 1). The same applies to a gate a child agent's own bash tool timed out: Pi kills that process group itself, and the corpses still need reaping.
+
+**The reviewer is told not to re-run the gate.** In a `/work` cycle the adversarial reviewer's prompt names the project's verify command and says the driver already owns it — run targeted checks only. `adversarial_loop` called directly is unchanged: nothing ran a gate there, so the reviewer is still asked to.
 
 ### Verify command discovery
 

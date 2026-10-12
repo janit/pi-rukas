@@ -68,6 +68,8 @@ export async function runAdversarialLoop(
     getDiff?: () => Promise<string>;
     /** The issue this diff is meant to satisfy (#278). Optional: older state files have none. */
     issueBody?: string;
+    /** The gate the driver already ran green on this tree; the reviewer is told not to re-run it. */
+    gateCmd?: string;
     /** #799 — the slow-run recorder for this loop's inner children (each
      * threshold crossing of a review / fix round appends dispatch-slow), and
      * the parent pi for their slow-run watch (the PM notice half). */
@@ -348,6 +350,7 @@ export async function runAdversarialLoop(
         round,
         maxRounds: MAX_ROUNDS,
         issueBody: params.issueBody,
+        gateCmd: params.gateCmd,
         // #1040 — comments this round's diff removed, for the reviewer to judge.
         commentEvidence: renderCommentEvidence(lastComments),
       }),
@@ -362,7 +365,7 @@ export async function runAdversarialLoop(
     const verdict = parseVerdict(adv.text);
     rounds.push({ round, verdict, ms: adv.ms });
     if (params.reportOnly) {
-      if (!verdict.verdictParsed) {
+      if (verdict.verdictParsed !== true) {
         return ledgerWrite(
           infraFailureResult(
             round,
