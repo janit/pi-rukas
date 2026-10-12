@@ -1009,6 +1009,10 @@ It used to continue. The failure was recorded in `plumbReports` rather than the 
 
 **The fix may still be on disk.** Check `git -C .worktrees/issue-<N>-<id> status` before re-running — the developer's work is usually there, uncommitted.
 
+### A second `commit-pr` after `lens-fix`, then `integration-worktree-violation` and a non-fast-forward push
+
+Symptom: after `lens-fix` and a long re-review the driver ran `commit-pr` again instead of `lens-review`, logged `integrate worktree creation failed … refusing to force-remove existing worktree …/issue-<N>-default — it holds unrecoverable work: (unpushed commits: N)` and `! [rejected] … (non-fast-forward)`, and parked. Two causes, both fixed: a `dispatch-slow` event (any dispatch past the slow-run threshold) was appended after the step's verdict, and the driver routes on the last event — so the approval was shadowed and the cycle fell through to `commit-pr`; and the fallback's integrate worktree treated the cycle's own workstream tree as a foreign leftover. On an older build the work is intact in `.worktrees/issue-<N>-<id>` (detached HEAD) — cherry-pick it onto the branch.
+
 ### `integration-verify-failed` — the consolidated tree does not build
 
 `commit-pr` runs the project's `.pi/verify-cmd` against the **integrated** tree, between the commit and the push. Everything upstream saw one workstream in isolation: the develop gate ran inside a single worktree and adversarial reviewed a single worktree's diff. Two workstreams that each pass alone can still fail together — one renames or deletes what another still refers to — and that defect is *created* by integration, so integration is the only place it can be caught.

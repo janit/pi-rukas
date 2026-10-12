@@ -136,6 +136,7 @@ export async function ensureIntegrateWorktreeOrHalt(
         issue: ctx.issue,
         branchName,
         baseSha: ps.baseSha,
+        cycleWorktrees: Object.values(ps.worktrees ?? {}),
       },
       workStateFile(ctx.repoRoot, ctx.issue),
     );
