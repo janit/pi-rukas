@@ -15,6 +15,7 @@ import { MAX_REVIEW_ROUNDS } from "./work-driver-context.ts";
 import { explainCap } from "./work-driver-explain.ts";
 import { fanoutVerdictLines } from "./work-driver-handoff-fanout.ts";
 import { recoveryCommandsChat } from "./work-driver-handoff-recovery.chat.ts";
+import { unreadableSnapshotLines } from "./work-driver-handoff-snapshot.ts";
 import type { WorkEvent, WorkState } from "./workflow-state.ts";
 
 /**
@@ -94,12 +95,18 @@ export function renderHandoffUserMessage(
     (handoffEvt?.kind === "handoff-emitted" ? handoffEvt.handoffBodyPath : undefined) ??
     `${scratchDirAbs}/handoff-comment.md`;
   const branchName = ps.branchName ?? "(branch not captured)";
+  // A failed git read leaves the snapshot's zeros in place; they must not be
+  // printed as findings (see `handoffSnapshot.unreadable`).
+  const notRead = unreadableSnapshotLines(ps);
+  const snapNotRead = notRead.length > 0;
   const branchPushedTag = snap
     ? // #398 — `branchPushed: false` because no branch was ever CREATED used to
       // render "(NOT pushed — local only)", which asserts a local branch
       // exists. `branchExists` is the field that distinguishes them.
       !snap.branchExists
-      ? " (no branch was created)"
+      ? snapNotRead
+        ? " (branch state not read)"
+        : " (no branch was created)"
       : snap.branchPushed
         ? " (pushed)"
         : " (NOT pushed — local only)"
@@ -164,7 +171,10 @@ export function renderHandoffUserMessage(
       ? `  branch: ${ps.branchName}${branchPushedTag}${headTag}`
       : `  no branch was created${headTag}`,
     `  ${prTag}`,
-    `  ${fileCount} file(s) modified${snap && snap.stagedCount > 0 ? ` (${snap.stagedCount} staged, ${snap.unstagedCount} unstaged)` : ""}`,
+    snapNotRead
+      ? `  modified files: NOT READ (${fileCount} seen)`
+      : `  ${fileCount} file(s) modified${snap && snap.stagedCount > 0 ? ` (${snap.stagedCount} staged, ${snap.unstagedCount} unstaged)` : ""}`,
+    ...notRead.map((l) => `  ${l}`),
   );
   // The review's own findings, in the surface the operator actually reads.
   // This message showed them NOWHERE — not a pointer, not a count — while the
