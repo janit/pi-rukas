@@ -313,6 +313,7 @@ export async function mechanizedCommitPr(
     }
     // A second round pushed onto the PR that is already open — nothing to create.
     if (existingPr !== undefined) {
+      trace(`work-driver: commit-pr — ${branchName} updated; PR #${existingPr} was already open`);
       const rootState = await inspectCommitPrRoot(execFn, ctx.repoRoot);
       const next = finalizeCommitPrState(
         state,
@@ -384,6 +385,7 @@ export async function mechanizedCommitPr(
         reason: `forge pr create succeeded but returned no PR number (url=${(created.url ?? "").slice(0, 120)})`,
       };
     }
+    trace(`work-driver: commit-pr — opened PR #${prNumber} for ${branchName}`);
     // 5. Emit the same event shapes the dispatch path produces so the shared
     // downstream (parsePrNumber + both gates) runs unchanged. #782 — the
     // flake-recovery event (verify-flake-recovered, step: "commit-pr") is
