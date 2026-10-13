@@ -66,6 +66,8 @@ export async function runAdversarialLoop(
     workCwd?: string;
     /** Recompute the diff before each review. Without it rounds 2+ see pre-fix material. */
     getDiff?: () => Promise<string>;
+    /** What the fix pass before this review changed (fix-delta.ts); first round only. */
+    fixDelta?: string;
     /** The issue this diff is meant to satisfy (#278). Optional: older state files have none. */
     issueBody?: string;
     /** The gate the driver already ran green on this tree; the reviewer is told not to re-run it. */
@@ -351,6 +353,7 @@ export async function runAdversarialLoop(
         maxRounds: MAX_ROUNDS,
         issueBody: params.issueBody,
         gateCmd: params.gateCmd,
+        fixDelta: round === firstRound ? params.fixDelta : undefined,
         // #1040 — comments this round's diff removed, for the reviewer to judge.
         commentEvidence: renderCommentEvidence(lastComments),
       }),
