@@ -98,6 +98,9 @@ export const KNOWN_EVENT_KINDS = [
   // dispatch-completed). A state file written by a newer driver must
   // resume on an older one's reader without halting on an unknown kind.
   "dispatch-slow",
+  // The session-shutdown record. Absent from the tuple, the one cycle this
+  // event promises is resumable would refuse to resume.
+  "cycle-interrupted",
 ] as const;
 
 // #986 — compile-time exhaustiveness. If the `WorkEvent` union gains a kind
