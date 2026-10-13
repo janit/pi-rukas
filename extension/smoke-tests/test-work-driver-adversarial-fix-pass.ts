@@ -11,6 +11,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   devCommit,
+  fixCtx,
   fixState,
   git,
   repoWithFile,
@@ -26,6 +27,7 @@ import {
 } from "../src/work-driver-adversarial-fix.ts";
 import type { DriverContext } from "../src/work-driver-context.ts";
 import { nextStep } from "../src/work-driver-context.ts";
+import { explainCap } from "../src/work-driver-explain.ts";
 import type { WorkState } from "../src/workflow-state.ts";
 
 let exit = 0;
@@ -294,8 +296,52 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
       out.pipelineState.plumbReports.some((r) => r.body.includes("origin/main comment")),
       "G: the handoff names the removed comment",
     );
+    const cap = explainCap("verify-failed:develop", out);
+    assert(
+      cap.includes("origin/main comment") && !cap.includes("evidence detail missing"),
+      `G: the cap text names the comment check (got ${cap.slice(0, 200)})`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// G2 — a comment reworded in place never reappears verbatim. That is the
+// reviewers' call, not a park. G3 — nor is a comment an EARLIER pass removed:
+// the diff is against the base, so it carries that removal into every fix pass.
+{
+  const x = path.join("extension", "src", "x.ts");
+  const withComment =
+    "export const x = 1;\n// the parser lives in the doors row\nexport const y = 2;\n";
+  const cases = [
+    {
+      label: "G2: a fix pass that rewords an origin/main comment is applied",
+      firstPass: undefined,
+      fix: "export const x = 1;\n// the parser lives in the header band\nexport const y = 2;\n",
+    },
+    {
+      label: "G3: a comment the first develop pass removed does not park the fix pass",
+      firstPass: "export const x = 1;\nexport const y = 2;\n",
+      fix: "export const x = 3;\nexport const y = 2;\n",
+    },
+  ];
+  for (const c of cases) {
+    const dir = repoWithFile("fix-reword");
+    try {
+      mkdirSync(path.join(dir, "extension", "src"), { recursive: true });
+      writeFileSync(path.join(dir, x), withComment);
+      git(dir, "add -A");
+      git(dir, 'commit -q -m "add x"');
+      const st = fixState(dir, ["extension/src/x.ts"], "extension/src/x.ts: fix it");
+      if (c.firstPass) devCommit(dir, x, c.firstPass);
+      const ctx = fixCtx(dir, () => devCommit(dir, x, c.fix));
+      const out = await runAdversarialFixPass(ctx, st, pendingFixes(st.eventLog), Date.now());
+      const tail = out.eventLog[out.eventLog.length - 1];
+      const why = tail?.kind === "cap-hit" ? tail.evidence : tail?.kind;
+      assert(tail?.kind === "adversarial-fix-applied", `${c.label} (tail: ${why})`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 }
 
