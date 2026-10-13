@@ -69,6 +69,7 @@
  * from `./workflow-state.ts`.
  */
 
+import { renameSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { WORK_STATE_SCHEMA_VERSION, type WorkState } from "./workflow-state-schema.ts";
@@ -169,6 +170,18 @@ export async function writeState(repoRoot: string, state: WorkState): Promise<vo
   const tmp = `${file}.tmp`;
   await fs.writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   await fs.rename(tmp, file);
+}
+
+/**
+ * `writeState`, synchronously — for the one caller that cannot rely on the
+ * event loop outliving its `await`: the session-shutdown record
+ * (work-driver-interrupt.ts) is written from a process that is exiting.
+ */
+export function writeStateSync(repoRoot: string, state: WorkState): void {
+  const file = workStateFile(repoRoot, state.issue);
+  const tmp = `${file}.sync.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ ...state, updatedAt: Date.now() }, null, 2)}\n`, "utf8");
+  renameSync(tmp, file);
 }
 
 /**

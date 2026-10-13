@@ -162,5 +162,7 @@ export function fmtEvent(e: WorkEvent): string {
       // surface: a 3-hour dispatch crossing 20m / 40m / 80m reads as three
       // rows, each one the durable proof that someone was prompted.
       return `  dispatch-slow · ${e.step} · ${e.label} · ${fmtElapsed(e.elapsedMs)} · ${e.turns} turn${e.turns === 1 ? "" : "s"} · ${fmtTokens(e.tokens)} tok`;
+    case "cycle-interrupted":
+      return `  cycle-interrupted · ${e.step} · session shutdown (${e.reason})${e.branch ? ` · ${e.branch}${e.headSha ? ` @ ${e.headSha.slice(0, 8)}` : ""}` : ""} · ${e.resumable ? "resumable" : "NOT resumable"}`;
   }
 }

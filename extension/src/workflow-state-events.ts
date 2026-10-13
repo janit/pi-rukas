@@ -401,6 +401,24 @@ export type WorkEvent =
   | BranchResetEvent
   | WorktreeLeftoverHandledEvent
   | DispatchSlowEvent
-  | FenceRecoveryStartedEvent;
+  | FenceRecoveryStartedEvent
+  | {
+      /**
+       * The session was shut down under a running cycle (Pi's
+       * `session_shutdown`). NOT a failure and never followed by a cap-hit:
+       * status stays `running`, and the next `/work <N>` re-enters `step`.
+       */
+      kind: "cycle-interrupted";
+      at: number;
+      /** The step that was running, or about to start. */
+      step: WorkStep;
+      /** Pi's shutdown reason: `quit` | `reload` | `new` | `resume` | `fork`. */
+      reason: string;
+      /** Where the work is, when the cycle had got that far. */
+      branch?: string;
+      headSha?: string;
+      /** False when the state on disk is one the re-entry check refuses. */
+      resumable: boolean;
+    };
 /** Discriminator union of event kinds — useful for callers that switch on it. */
 export type WorkEventKind = WorkEvent["kind"];
