@@ -945,6 +945,14 @@ Without `--restart`, re-invoking `/work N` on a terminal-state file now emits a 
 
 `--restart` only wipes the driver's state file (`.pi/work-state/N.json`). Worktrees and feature branches from the prior cycle are NOT removed — the branch step reuses them at runtime: a leftover at the same path with no uncommitted work and no unpushed commits is removed and recreated (the common path, unchanged), but a leftover that HOLDS work is refused instead (see `worktree-dirty-preremove` below). If you want a fully clean slate, salvage any work first, then `git worktree remove --force -- .worktrees/issue-N-*` and `git branch -D feature/issue-N-*` before re-running.
 
+### `/work N --restart` parked again and posted no new comment
+
+**Symptom:** a restarted cycle ends as `intent-park` again, explore ran, but the issue has no second "Cap hit" comment. The handoff reads *"REPEAT of the park reported N min ago (<comment link>) …"*.
+
+**Why:** `--restart` re-resolves the issue from scratch every time. When that fresh resolution parks for the same reason, against the same issue text and the same checked-out commit as the park already reported, a second comment would say nothing new — so the handoff links the earlier one instead (the `needs-human-attention` label is still verified and re-applied). The earlier park is remembered in `.pi/work-state/N/intent-park.txt`, which `--restart` does not wipe. Any difference — another park reason, an edited issue, a moved `HEAD`, a missing or unreadable record — posts a new comment as before.
+
+**Fix:** none needed; act on the linked comment. Delete the record file if you want the next park reported in full regardless.
+
 ### `worktree-dirty-preremove` — the branch step refuses a worktree that holds uncommitted work (#475)
 
 **Symptom:** `/work N --restart` (or a fresh `/work N` over a surviving worktree directory) halts at step 3 (branch) with cap `step-failed:branch` and a plumb report reading *“refusing to force-remove existing worktree <path> — it holds unrecoverable work: …”*. No subagent ran; nothing was pushed.
@@ -1411,7 +1419,7 @@ Three distinct causes, and they are told apart by *when* the child died.
 
 **The driver retried the step with a new child.** When the child's own retries are exhausted the step router re-runs the step (up to 2 more attempts for a severed provider). That is a fresh child with no memory of the first one, and the `↻ … retrying attempt 2` line now says what went with it: `explore attempt 1 lost: 15m09s, 45 turns, 412k tokens — the step restarts from the beginning`. For `develop` only the conversation is lost — the worktree is the same one, so the retried developer is told a previous attempt was interrupted and to read `git status` / `git log` there before implementing anything. Seeing this line means a provider or network fault, not a defect in the change.
 
-**A fan-out step hit a 429 and halted instead of waiting.** The taxonomy honours a provider's `retry-after` — that is why single dispatches recover from throttling. It never ran for fan-out children, because the router classified only the last event and `runDevelop` ends on `branches-converged`. Fixed. Note the deliberate limit: if *any* workstream succeeded, the step is not retried, because re-running it would re-dispatch work that already landed.
+**A fan-out step hit a 429 and halted instead of waiting.** The taxonomy honours a provider's `retry-after` — that is why single dispatches recover from throttling. It never ran for fan-out children, because the router classified only the last event and `runDevelop` ends on `branches-converged`. The first fix reached only the scrollback line: the `✗ step failed` line was withheld for a retry the router then never made, so a multi-workstream develop still halted with `transientRetryAttempts: {}`. The retry decision now uses the same lookup, and a fan-out whose workstreams *all* failed transiently waits and re-runs like a single dispatch (up to 2 more attempts). Note the deliberate limit: if *any* workstream succeeded, the step is not retried, because re-running it would re-dispatch work that already landed — the develop step itself re-runs only the failed workstreams, once.
 
 **The machine went to sleep.** This is the most common one on a laptop and it looks exactly like a provider failure — `Provider request error: terminated`. That string is undici's mid-stream body abort, raised when a socket dies; the real cause is discarded upstream. Signs it was a suspend:
 
