@@ -15,7 +15,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { LensReviewSummary } from "./lens-review.ts";
 import type { OnSlowCallback } from "./slow-notice.ts";
-import type { DispatchResult } from "./types.ts";
+import type { DispatchImage, DispatchResult } from "./types.ts";
 import { KNOWN_STATUSES } from "./workflow-state-validate.ts";
 import { WORK_STEPS, type WorkState, type WorkStep } from "./workflow-state.ts";
 
@@ -161,7 +161,7 @@ export interface DriverContext {
    */
   dispatchFn?: (
     pi: ExtensionAPI,
-    spec: { role: string; prompt: string; cwd?: string },
+    spec: { role: string; prompt: string; cwd?: string; images?: DispatchImage[] },
     opts?: {
       label?: string;
       skipDeck?: boolean;

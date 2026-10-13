@@ -7,7 +7,6 @@
  */
 
 import fs from "node:fs/promises";
-import { dispatchCore } from "./dispatch.ts";
 import { slowRecorder } from "./slow-events.ts";
 import { trace } from "./trace.ts";
 import { driverDeckOpts } from "./work-driver-deck-header.ts";
@@ -19,6 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { transcriptPathFor } from "./spawn-support.ts";
 import type { DispatchResult } from "./types.ts";
 import type { DriverContext } from "./work-driver-context.ts";
+import { issueImagesFor } from "./work-driver-issue-images.ts";
 import { buildCompletionEvent } from "./work-driver-merged.ts";
 import { checkAndRegisterClaims, crossGroupConflictsEnabled } from "./work-driver-path-claims.ts";
 import { mergeCoupledWorkstreams } from "./work-driver-plan-coupling.ts";
@@ -93,9 +93,10 @@ export async function runPlan(
     { ...state, pipelineState: { ...state.pipelineState, currentStep: "plan" } },
     { kind: "step-started", step: "plan", at: now },
   );
-  const dispatch = ctx.dispatchFn ?? dispatchCore;
+  const issues = activeIssuesOf(state);
+  const { dispatch, section } = await issueImagesFor(ctx, issues, "plan");
   const startedAt = Date.now();
-  const prompt = inlinePlanPrompt(activeIssuesOf(state), scratchDir(ctx.repoRoot, ctx.issue));
+  const prompt = inlinePlanPrompt(issues, scratchDir(ctx.repoRoot, ctx.issue)) + section;
   // #573 — derive transcript path BEFORE beginDispatch so crash-resume can
   // locate the surviving session file. Single dispatch: seq=undefined.
   const planRunId = `plan:explore:${process.pid}:${startedAt}`;
