@@ -1034,6 +1034,8 @@ It used to continue. The failure was recorded in `plumbReports` rather than the 
 
 **The fix may still be on disk.** Check `git -C .worktrees/issue-<N>-<id> status` before re-running — the developer's work is usually there, uncommitted.
 
+**A committed fix that could not be integrated is named.** When the fixer committed and the pick onto the branch failed, the handoff gives the fix's sha, the worktree holding it and the conflicting paths — the PR does not contain that commit, so land it by hand before merging. On an older build the second lens-fix round parked this way on its own: integration re-picked a commit that was already on the branch behind the tip (`Committing is not possible because you have unmerged files` in the evidence), stranding the round's real fix one commit ahead in the worktree. Fixed: a commit already in the branch's history is skipped.
+
 ### A second `commit-pr` after `lens-fix`, then `integration-worktree-violation` and a non-fast-forward push
 
 Symptom: after `lens-fix` and a long re-review the driver ran `commit-pr` again instead of `lens-review`, logged `integrate worktree creation failed … refusing to force-remove existing worktree …/issue-<N>-default — it holds unrecoverable work: (unpushed commits: N)` and `! [rejected] … (non-fast-forward)`, and parked. Two causes, both fixed: a `dispatch-slow` event (any dispatch past the slow-run threshold) was appended after the step's verdict, and the driver routes on the last event — so the approval was shadowed and the cycle fell through to `commit-pr`; and the fallback's integrate worktree treated the cycle's own workstream tree as a foreign leftover. On an older build the work is intact in `.worktrees/issue-<N>-<id>` (detached HEAD) — cherry-pick it onto the branch.
