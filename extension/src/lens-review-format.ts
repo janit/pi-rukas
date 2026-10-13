@@ -146,12 +146,14 @@ Read the supplied content above rather than opening files. Your filesystem is ch
 ## How to report findings
 
 For every issue you identify in your lane, call the \`report_finding\` tool ONCE with these fields:
-  - severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
-  - path: file path relative to repo root
+  - severity (required): "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
+  - path (required): file path relative to repo root
   - line: line number (omit for file-level findings)
-  - title: short title (< 80 chars)
+  - title (required): short title (< 80 chars)
   - description: 1–3 sentence description of the issue
   - suggestion: short suggested fix
+
+A call missing any required field is rejected and records nothing — repeat it with every field, not only the one the error names.
 
 Do NOT batch multiple findings into a single call — one tool call per finding. Do NOT emit findings as JSON in your prose; only the \`report_finding\` tool calls count.
 
@@ -383,7 +385,11 @@ export function renderSummary(s: LensReviewSummary, maxLensAttempts: number): st
       const findingCount = `${r.findings.length} finding${r.findings.length === 1 ? "" : "s"}`;
       const retryNote =
         r.attempts > 1 ? ` (succeeded on attempt ${r.attempts}/${maxLensAttempts})` : "";
-      tag = `${findingCount}${retryNote}`;
+      // A call the tool rejected (or one with an unusable severity) records
+      // nothing; say so beside the count, or a finding the lens lists in its
+      // prose but never re-sent is invisible here.
+      const skippedNote = r.parseError ? ` — ${r.parseError}` : "";
+      tag = `${findingCount}${retryNote}${skippedNote}`;
     } else {
       tag = r.parseError ?? "fail";
     }
