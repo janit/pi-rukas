@@ -86,7 +86,7 @@ Because no tool call is involved, `sandbox-fs-guard` has no part in it, and `PI_
 
 What the driver will not take from a manifest: a manifest for another issue, a `file` that is not a plain name in that directory, a symbolic link, a `type` other than `image/png`, `image/jpeg`, `image/gif` or `image/webp`, more than 8 images or 10 MB together. A `link` that is not a plain `https` address is not printed. A multi-issue cycle gets no images. `PI_ENSEMBLE_ISSUE_IMAGES=0` turns it off.
 
-The driver does not check that the step's model reads images. A launcher should set this up only for a model that does: for any other the prompt section describes pictures the model cannot see, or the model's server refuses the request. A crash-resumed dispatch is re-attached with text only.
+The driver does not check that the step's model reads images. A launcher should set this up only for a model that does: for any other the prompt section describes pictures the model cannot see, or the model's server refuses the request. A dispatch that is resumed after a crash continues the Pi session of the first one, which holds the kickoff message; the resume prompt itself is text.
 
 For your provider to actually use the image, `~/.pi/agent/models.json` must mark the model as multimodal: `"input": ["text", "image"]`. Built-in providers (Anthropic / OpenAI / Google) know vision capabilities natively; custom OpenAI-compatible providers (e.g. halo's Qwen3.6) need the explicit hint.
 
