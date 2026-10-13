@@ -35,6 +35,7 @@ import {
 } from "./work-driver-adversarial-fix-scope.ts";
 import type { AdversarialOutcome } from "./work-driver-adversarial-types.ts";
 import type { DriverContext } from "./work-driver-context.ts";
+import { FIX_PASS_PARK_MARKER } from "./work-driver-explain-verify.ts";
 import { beginDispatch } from "./work-driver-resume.ts";
 import { verifyTimeoutMs } from "./work-driver-verify-develop-helpers.ts";
 import { execp as argvExecp } from "./work-driver-verify.ts";
@@ -338,13 +339,14 @@ function parkFixPass(
   now: number,
 ): WorkState {
   // The handoff's cap text reads verifyEvidence, not the event: without it the
-  // park reads "(evidence detail missing from state)".
+  // park reads as one whose reason was never recorded. The marker is what
+  // keeps that text from blaming the outcome gate.
   const reported = withFixPassReport(state, pending, reason, now);
   const evidenced: WorkState = {
     ...reported,
     pipelineState: {
       ...reported.pipelineState,
-      verifyEvidence: { step: "develop", failures: [`adversarial fix pass: ${reason}`], at: now },
+      verifyEvidence: { step: "develop", failures: [`${FIX_PASS_PARK_MARKER} ${reason}`], at: now },
     },
   };
   return appendEvent(evidenced, {
