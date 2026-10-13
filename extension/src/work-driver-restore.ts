@@ -224,22 +224,17 @@ async function preserveDiscardedState(
   scratchDir: string,
   label: string,
 ): Promise<string | undefined> {
+  // The git read in flight, so a failure names the command that failed.
+  let argv: string[] | undefined;
+  const read = async (args: string[], maxBuffer: number): Promise<string> => {
+    argv = args;
+    return (await execFn("git", { cwd: repoRoot, maxBuffer, argv: args })).stdout;
+  };
   try {
-    const { stdout: status } = await execFn("git", {
-      cwd: repoRoot,
-      maxBuffer: 1024 * 1024,
-      argv: ["status", "--porcelain"],
-    });
-    const { stdout: unstaged } = await execFn("git", {
-      cwd: repoRoot,
-      maxBuffer: 8 * 1024 * 1024,
-      argv: ["diff"],
-    });
-    const { stdout: staged } = await execFn("git", {
-      cwd: repoRoot,
-      maxBuffer: 8 * 1024 * 1024,
-      argv: ["diff", "--cached"],
-    });
+    const status = await read(["status", "--porcelain"], 1024 * 1024);
+    const unstaged = await read(["diff"], 8 * 1024 * 1024);
+    const staged = await read(["diff", "--cached"], 8 * 1024 * 1024);
+    argv = undefined;
     if (!status.trim() && !unstaged.trim() && !staged.trim()) return undefined;
     fs.mkdirSync(scratchDir, { recursive: true });
     const file = path.join(
@@ -263,8 +258,12 @@ ${staged}
     trace(`work-driver: ${label} — discarded state preserved to ${file}`);
     return file;
   } catch (err) {
+    // Name the argv and git's own stderr: a bare `Command failed: git` (#32)
+    // could not be told apart from an environment failure.
+    const e = err as Error & { stderr?: string };
+    const what = argv ? `\`git ${argv.join(" ")}\` failed: ` : "";
     trace(
-      `work-driver: ${label} — could not preserve discarded state: ${(err as Error).message?.slice(0, 160)}`,
+      `work-driver: ${label} — could not preserve discarded state: ${what}${(e.stderr?.trim() || e.message)?.slice(0, 160)}`,
     );
     return undefined;
   }
