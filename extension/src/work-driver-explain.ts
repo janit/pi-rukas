@@ -8,17 +8,16 @@
 import { developVerdictLines } from "./work-develop-verdict-source.ts";
 import { commitPrRootBlurb } from "./work-driver-commit-inspect.ts";
 import { MAX_CI_RETRIES, MAX_REVIEW_ROUNDS } from "./work-driver-context.ts";
-import { HOST_EXHAUSTION_LABEL, isHostExhaustionFailure } from "./work-driver-exec-error.ts";
 import { explainConsolidation } from "./work-driver-explain-consolidation.ts";
 import { explainDetectCaps } from "./work-driver-explain-detect-caps.ts";
 import { explainLens } from "./work-driver-explain-lens.ts";
 import { explainOther } from "./work-driver-explain-other.ts";
 import { explainPrSteps } from "./work-driver-explain-pr-steps.ts";
 import { explainReview } from "./work-driver-explain-review.ts";
+import { explainVerifyFailed } from "./work-driver-explain-verify.ts";
 import { cherryPickRecoveryFor } from "./work-driver-handoff-cherry-pick.ts";
 import { type ParkReason, explainPark } from "./work-driver-intent.ts";
 import { explainMergeHold } from "./work-driver-merge-authority.ts";
-import { BASELINE_RED_MARKER } from "./work-driver-verify-baseline.ts";
 import { lastCapHit } from "./workflow-state-cap.ts";
 import {
   type WorkEvent,
@@ -308,50 +307,7 @@ export function explainCap(
   // the step's claimed result isn't backed by executed evidence. The
   // per-check findings live in pipelineState.verifyEvidence.
   if (cap.startsWith("verify-failed:")) {
-    const step = cap.slice("verify-failed:".length);
-    const evidence = state.pipelineState.verifyEvidence;
-    const findings =
-      evidence && evidence.failures.length > 0
-        ? `\n${evidence.failures.map((f) => `  - ${f}`).join("\n")}`
-        : " (evidence detail missing from state)";
-    // #841 — when the cap carries the persisted raw-output log paths
-    // STRUCTURALLY (the consolidated verify's run1/run2 logs, recorded on
-    // the cap-hit event's `logPaths` field by the gate's emit site), render
-    // them here. The failure-string bullets above already name the path, but
-    // the operator reads the closing sentence for WHERE to look; an empty
-    // failures list (the "(evidence detail missing)" shape) otherwise leaves
-    // the log path reachable only from the raw event. No prose scanning —
-    // the paths ride on the event, never parsed out of it. Absent on
-    // pre-#841 state files (say nothing rather than guess).
-    let logLine = "";
-    if (step === "develop") {
-      const capHit = lastCapHit(state, `verify-failed:${step}`);
-      const logPaths = capHit?.logPaths;
-      if (logPaths && logPaths.length > 0) {
-        logLine = `\nFull raw verify output: ${logPaths.join(", ")} (scratch dir — inspect it before re-dispatching)`;
-      }
-    }
-    // #782 — the consolidated-verify gate re-runs the verify command once
-    // before classifying. When the re-run happened, say so so the operator
-    // can tell a genuine double failure from one that recovered; absent on
-    // pre-#782 state files (treat absent as "no re-run", no suffix).
-    let retryNote = "";
-    if (evidence && (evidence.retries ?? 0) > 0) {
-      const n = evidence.retries;
-      const verb = n === 1 ? "retried once" : `retried ${n} times`;
-      retryNote = evidence.recovered
-        ? `\nNote: the verify command was ${verb} and RECOVERED — the recorded failure was a transient flake; inspect the worktree(s) to confirm nothing else changed.`
-        : `\nNote: the verify command was ${verb} and still failed — this is a real failure, not a flake.`;
-    }
-    // Neither a check the host could not fork nor a gate already red at the
-    // base judged the change: "inspect the worktree(s)" would be wrong advice.
-    if (evidence?.failures.some(isHostExhaustionFailure)) {
-      return `the driver's outcome-verification gate could not run on the ${step} step — the system refused to start a process (fork failed / EAGAIN):${findings}${retryNote}${logLine}\nThe entries marked ${HOST_EXHAUSTION_LABEL} are environment failures, not defects in the change: those checks never executed. They name the pid count and limit where the driver runs — in a container that is the container's own pid limit, not a host ulimit. Restart it (or raise that limit), then re-run the cycle`;
-    }
-    const advice = evidence?.failures.some((f) => f.startsWith(BASELINE_RED_MARKER))
-      ? "The verify command already fails at the cycle's base commit — fix the gate there (or the host it runs on) before inspecting the worktree(s), then re-run."
-      : "Inspect the worktree(s), fix or re-dispatch, and re-run.";
-    return `the driver's outcome-verification gate rejected the ${step} step's "done" claim — the claimed result is not backed by executed evidence:${findings}${retryNote}${logLine}\nNo LLM judged this; the driver ran the checks itself (git diff/rev-list, the project's verify command, gh pr view). ${advice} Set PI_ENSEMBLE_VERIFY=0 to disable the gate (not recommended)`;
+    return explainVerifyFailed(cap.slice("verify-failed:".length), state);
   }
   // #753 — deferred worktree-creation failure. Its own sentence, because
   // `step-failed:develop` would be a mislabel (the dispatch itself never
