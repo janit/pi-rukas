@@ -454,6 +454,36 @@ else process.env.PI_ENSEMBLE_SANDBOX_MODE = prevSandbox;
   );
 }
 
+// janit/pi-rukas#45 — a chain of read-only commands is refused (the allowlist
+// matches one command), but the refusal must say THAT, and how to proceed,
+// rather than call `git status && git log` an injection chain.
+{
+  const { pmBashRefusal } = await import("../src/pm-bash-guard.ts");
+  const chain =
+    "cd /repo && git log --oneline -8 feature/x && echo '--- diff ---' && git diff --stat origin/main...feature/x";
+  assert(pmVerdict(chain) === null, "#45: a chain of read-only commands is still not matched (null)");
+  for (const part of ["git log --oneline -8 feature/x", "git diff --stat origin/main...feature/x"]) {
+    assert(pmVerdict(part) === "allow", `#45: each part passes on its own (${part})`);
+  }
+  assert(
+    pmVerdict("git -C /repo log --oneline -8 feature/x") === "allow",
+    "#45: the `git -C <dir>` form the refusal recommends is allowed",
+  );
+  const chained = pmBashRefusal(pmVerdict(chain));
+  assert(!/injection/i.test(chained), "#45: a chained command is not called an injection");
+  assert(
+    /ONE allowlisted command per call/.test(chained) && /its own bash call/.test(chained),
+    "#45: the refusal says to run each part separately",
+  );
+  assert(/git -C <dir>/.test(chained), "#45: the refusal names the cd-free form");
+  const offList = pmBashRefusal(pmVerdict("git push origin main"));
+  assert(pmVerdict("git push origin main") !== "allow", "#45: a mutation is still refused");
+  assert(
+    /not on the PM bash allowlist/.test(offList) && !/ONE allowlisted command per call/.test(offList),
+    "#45: a single off-list command gets the allowlist message, not the chain one",
+  );
+}
+
 resetPmMode();
 console.log(`\nexit ${exit}`);
 process.exit(exit);
