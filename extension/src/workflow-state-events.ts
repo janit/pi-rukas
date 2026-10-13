@@ -266,6 +266,14 @@ export type WorkEvent =
        */
       parkReason?: string;
       /**
+       * On `cap: "intent-park"` — what the verdict was judged against (issue
+       * text + HEAD), and, when this cycle re-parked WITHOUT re-resolving
+       * because that is unchanged, the earlier park it repeats. See
+       * work-driver-park-memory.ts.
+       */
+      fingerprint?: string;
+      repeatOf?: { at: number; commentUrl: string };
+      /**
        * What the driver will do next: "handoff" (terminal), "step-back"
        * (Step 7h), or "ci" (Step 8).
        *

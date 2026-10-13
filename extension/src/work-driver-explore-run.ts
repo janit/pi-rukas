@@ -22,6 +22,7 @@ import {
 } from "./work-driver-explore.ts";
 import { deleteSpecArtifact, persistSpecArtifact } from "./work-driver-intent-artifact.ts";
 import { intentResolutionEnabled, reconcileVerdict } from "./work-driver-intent.ts";
+import { parkFingerprint, readRepeatPark } from "./work-driver-park-memory.ts";
 import {
   type ExploreVerdict,
   parseExploreVerdict,
@@ -175,6 +176,34 @@ export async function runExplore(
   // return without setting activeIssues/droppedIssues at all — silently
   // dropping per-issue routing so every requested issue proceeded.
   const useIntent = intentResolutionEnabled() && issues.length === 1;
+  // `--restart` wipes the state file, not the reasons for the last park. If
+  // this issue parked at the intent gate against the same issue text and the
+  // same commit, resolving it again buys the same verdict for a full explore
+  // dispatch — park on the recorded one instead (work-driver-park-memory.ts).
+  const settledBody = bodySettled[0];
+  const fingerprint =
+    useIntent && settledBody?.status === "fulfilled"
+      ? await parkFingerprint(ctx, settledBody.value.stdout)
+      : undefined;
+  const repeat = fingerprint
+    ? await readRepeatPark(ctx.repoRoot, ctx.issue, fingerprint)
+    : undefined;
+  if (repeat) {
+    trace(
+      `work-driver: intent — issue #${ctx.issue} parked ${Math.round((Date.now() - repeat.parkedAt) / 60_000)} min ago against the same issue text and commit; not re-resolving (${repeat.commentUrl})`,
+    );
+    next = { ...next, pipelineState: { ...next.pipelineState, normalisedSpec: repeat.spec } };
+    return appendEvent(next, {
+      kind: "cap-hit",
+      at: Date.now(),
+      cap: "intent-park",
+      reviewRound: next.pipelineState.reviewRound,
+      nextStep: "handoff",
+      ...(repeat.spec.parkReason ? { parkReason: repeat.spec.parkReason } : {}),
+      fingerprint,
+      repeatOf: { at: repeat.parkedAt, commentUrl: repeat.commentUrl },
+    });
+  }
   const prompt = inlineExplorePrompt(
     issues,
     scratchDir(ctx.repoRoot, ctx.issue),
@@ -247,6 +276,7 @@ export async function runExplore(
           reviewRound: next.pipelineState.reviewRound,
           nextStep: "handoff",
           ...(finalSpec.parkReason ? { parkReason: finalSpec.parkReason } : {}),
+          ...(fingerprint ? { fingerprint } : {}),
         });
       }
       return next;

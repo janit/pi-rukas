@@ -945,6 +945,21 @@ Without `--restart`, re-invoking `/work N` on a terminal-state file now emits a 
 
 `--restart` only wipes the driver's state file (`.pi/work-state/N.json`). Worktrees and feature branches from the prior cycle are NOT removed — the branch step reuses them at runtime: a leftover at the same path with no uncommitted work and no unpushed commits is removed and recreated (the common path, unchanged), but a leftover that HOLDS work is refused instead (see `worktree-dirty-preremove` below). If you want a fully clean slate, salvage any work first, then `git worktree remove --force -- .worktrees/issue-N-*` and `git branch -D feature/issue-N-*` before re-running.
 
+### `/work N --restart` parked again in seconds, without running explore
+
+**Symptom:** a restarted cycle ends as `intent-park` almost immediately, with no explore dispatch and no new comment on the issue. The handoff reads *"Parked N min ago for the same reason (<comment link>) … the driver did NOT re-resolve it"*.
+
+**Why:** an intent verdict depends on two things — the issue text and the commit it was grounded against. When a prior cycle parked at the intent gate and neither has changed, resolving again buys the same verdict for a full explore dispatch and a duplicate "Cap hit" comment (measured: 411–705 s per repeat on a factory that restarts every second cycle). The driver keeps the posted park in `.pi/work-state/N/intent-park.txt`, which `--restart` does not wipe, and parks on it.
+
+**Fix:** do what the park asked — edit the issue, or land the code change — and re-run; either one changes the fingerprint and the cycle resolves fresh. To force a fresh resolution with nothing changed:
+
+```bash
+rm .pi/work-state/N/intent-park.txt
+/work N --restart
+```
+
+Only intent parks are remembered. Every other cap re-runs on `--restart` as before, and an unreadable `HEAD` or record means no short-circuit.
+
 ### `worktree-dirty-preremove` — the branch step refuses a worktree that holds uncommitted work (#475)
 
 **Symptom:** `/work N --restart` (or a fresh `/work N` over a surviving worktree directory) halts at step 3 (branch) with cap `step-failed:branch` and a plumb report reading *“refusing to force-remove existing worktree <path> — it holds unrecoverable work: …”*. No subagent ran; nothing was pushed.

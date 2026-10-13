@@ -23,6 +23,7 @@ import {
   verifyHandoffLabel,
 } from "./work-driver-handoff-post.ts";
 import { captureWorktreeSnapshot } from "./work-driver-handoff-snapshot.ts";
+import { recordPark, repeatParkOf } from "./work-driver-park-memory.ts";
 import { releaseClaim } from "./work-driver-path-claims.ts";
 import { scratchDir } from "./work-driver-workspace.ts";
 import { runWorktreeTeardown } from "./work-driver-worktree-sweep.ts";
@@ -142,7 +143,13 @@ export async function runHandoff(
   // completion / dispatch-failed event construction moved verbatim.)
   const prNumber = state.pipelineState.prNumber;
   const target = prNumber ? `pr #${prNumber}` : `issue #${ctx.issue}`;
-  const dispatchResult = await runHandoffOpsDispatch(ctx, next, handoffBodyPath);
+  // A repeat intent park (work-driver-park-memory.ts) already has its comment
+  // on the issue: no ops dispatch, no second comment. The label is still
+  // verified below and re-applied if someone removed it.
+  const repeatPark = repeatParkOf(next);
+  const dispatchResult = repeatPark
+    ? { next, opsReplyText: "" }
+    : await runHandoffOpsDispatch(ctx, next, handoffBodyPath);
   next = dispatchResult.next;
   const opsReplyText = dispatchResult.opsReplyText;
   // RE-ENTRY DEDUPE (census 2026-09-09): a crash after the comment posted
@@ -161,6 +168,7 @@ export async function runHandoff(
   // The dedupe line, verbatim — re-entry reuses a prior event's URL and
   // never re-posts (the canary above pins the shape):
   let commentUrl = parseHandoffCommentUrl(opsReplyText) ?? priorHandoffCommentUrl(next.eventLog);
+  commentUrl ??= repeatPark?.commentUrl;
   if (parsed.commentUrl && !commentUrl) commentUrl = parsed.commentUrl;
   let labelApplied = false;
   // #798 — per-target label state. When prNumber is set, the driver labels
@@ -336,6 +344,7 @@ export async function runHandoff(
     prLabelApplied,
   });
   next = appendEvent(next, emitted);
+  await recordPark(ctx.repoRoot, next, commentUrl);
   // #571 — release the path claim so sibling cycles can proceed.
   try {
     await releaseClaim(ctx.repoRoot, ctx.issue);
