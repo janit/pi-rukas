@@ -45,6 +45,7 @@ import {
   settledGapsSection,
 } from "./plan-gaps.ts";
 import { type CarriedCritical, gapGatePrompt, gapGateVerifyPrompt } from "./plan-gate-prompt.ts";
+import { loadPlanImages, planImageLinksSection } from "./plan-images.ts";
 import {
   type InvestigationResult,
   PLAN_DISPATCH_TIMEOUT_MS,
@@ -76,6 +77,7 @@ import {
 } from "./plan-validate.ts";
 import { type ResolvedDecision, buildResolvedDecisions } from "./plan-writeback.ts";
 import { trace } from "./trace.ts";
+import { issueImagesSection, withIssueImages } from "./work-driver-issue-images.ts";
 
 const GAP_GATE_MAX_ITERATIONS = 2;
 
@@ -92,7 +94,14 @@ export async function runPlanPipeline(
   input: PlanDriverInput,
   repoRoot: string,
 ): Promise<PlanResult> {
-  const dispatch: PlanDispatchFn = getPlanDispatchOverride() ?? dispatchCore;
+  // The source issue's images (plan-images.ts): with every child, links in the body.
+  const images = await loadPlanImages();
+  const imagesSection = issueImagesSection(images, "planChild");
+  const dispatch: PlanDispatchFn = withIssueImages(
+    getPlanDispatchOverride() ?? dispatchCore,
+    images,
+    imagesSection,
+  );
   const { descriptor, context, dryRun } = input;
   const type = classifyPlanType(descriptor, input.type);
   const depth = input.depth ?? 0;
@@ -411,9 +420,9 @@ export async function runPlanPipeline(
   // residual disclosure. Append it HERE, before fileIssue, so the single
   // filing pass below sees the final body.
   const finalBody =
-    residualForDisclosure.length > 0
+    (residualForDisclosure.length > 0
       ? `${body}\n\n${residualGapsSection(residualForDisclosure)}`
-      : body;
+      : body) + planImageLinksSection(images);
 
   const resolvedGaps = gapGateEnabled ? gaps : [];
   // #74 — a digest-carrying confirm whose re-drafted spec changed is held as a dry run.

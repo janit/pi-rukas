@@ -21,6 +21,7 @@ import * as live from "./dispatch-deck-live.ts";
 import * as dispatchDeck from "./dispatch-deck.ts";
 import { type GitLineFor, gitStateLine } from "./git-state.ts";
 import * as lifecycle from "./lifecycle-events.ts";
+import * as pendingJobs from "./pending-jobs-signal.ts";
 import type { PiJsonEvent } from "./pi-event-shapes.ts";
 import type { RunningState } from "./progress.ts";
 import * as sessionAutosave from "./session-autosave.ts";
@@ -196,6 +197,8 @@ export function startJob(pi: ExtensionAPI, input: StartJobInput): StartJobHandle
     ownerKind,
   };
   jobs.set(jobId, state);
+  // #73 — only a PM-owned job owes the PM a report; the driver awaits its own.
+  if (ownerKind === "pm") pendingJobs.jobPending(jobId);
 
   if (!input.skipDeck) {
     dispatchDeck.startEntry(jobId, {
@@ -323,9 +326,14 @@ export function startJob(pi: ExtensionAPI, input: StartJobInput): StartJobHandle
               trace(`async job ${jobId} git-state report failed: ${String(err)}`);
               if (!delivered) deliver();
             })
-            .catch((err: unknown) => trace(`async job ${jobId} report failed: ${String(err)}`));
+            .catch((err: unknown) => trace(`async job ${jobId} report failed: ${String(err)}`))
+            .finally(() => pendingJobs.jobReported(jobId));
         } else {
-          deliver();
+          try {
+            deliver();
+          } finally {
+            pendingJobs.jobReported(jobId);
+          }
         }
       }
       trace(`async job ${jobId} (${input.label}, owner=${ownerKind}) finished in ${result.ms}ms`);
@@ -342,8 +350,11 @@ export function startJob(pi: ExtensionAPI, input: StartJobInput): StartJobHandle
       lifecycle.emitFailed(jobId, input.label, input.role, Date.now() - state.startedAt);
       sessionAutosave.recordOutcome(false);
       if (ownerKind === "pm") {
-        const report = formatFailReport(jobId, input.label, err);
-        deliverReport(pi, report);
+        try {
+          deliverReport(pi, formatFailReport(jobId, input.label, err));
+        } finally {
+          pendingJobs.jobReported(jobId);
+        }
       }
       trace(`async job ${jobId} (${input.label}, owner=${ownerKind}) failed: ${err.message}`);
       // Driver-owned callers want the error surfaced via the promise so
