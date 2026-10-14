@@ -14,6 +14,7 @@ import {
 import { formatCycleTotal } from "./work-driver-cycle-total.ts";
 import { explainCap } from "./work-driver-explain.ts";
 import { branchTipTag, unreadableSnapshotLines } from "./work-driver-handoff-snapshot.ts";
+import { mergedLine } from "./work-driver-terminal-delivery.ts";
 import { readQueueSummary } from "./work-queue-summary.ts";
 import { humanActionFor } from "./work-queue.ts";
 import { renderDispatchDurations } from "./work-status-dispatch-durations.ts";
@@ -157,7 +158,7 @@ export function renderTerminalStatus(state: WorkState, repoRoot: string): string
   const issue = state.issue;
   const statusBadge =
     ps.status === "merged"
-      ? "MERGED ✓"
+      ? mergedLine(state)
       : ps.status === "handoff"
         ? "HANDOFF (cap-hit, needs human attention)"
         : "ABORTED (mid-flight failure, needs human attention)";

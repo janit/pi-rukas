@@ -18,15 +18,19 @@ export const FIX_PASS_PARK_MARKER = "adversarial fix pass:";
 export const PR_NOT_OPEN_MARKER = "[pr-not-open]";
 
 /**
- * The commit-pr re-entry refusal, or `undefined` for a real outcome-gate
- * failure. Nothing was committed, pushed or claimed on that round, so the
- * gate's "done claim rejected" sentence would describe something that did not
- * happen.
+ * A park on a PR that is no longer open — the commit-pr re-entry refusal, or
+ * a PR closed during review (work-driver-pr-gone.ts) — or `undefined` for a
+ * real outcome-gate failure. Nothing was committed, pushed or claimed on that
+ * round, so the gate's "done claim rejected" sentence would describe something
+ * that did not happen.
  */
 export function explainPrNotOpen(state: WorkState): string | undefined {
-  const failures = state.pipelineState.verifyEvidence?.failures ?? [];
+  const evidence = state.pipelineState.verifyEvidence;
+  const failures = evidence?.failures ?? [];
   if (!failures.some((f) => f.startsWith(PR_NOT_OPEN_MARKER))) return undefined;
-  return `the cycle's pull request was no longer open when commit-pr ran again, so the driver refused before rebuilding or pushing anything:\n${failures.map((f) => `  - ${f}`).join("\n")}\nThe driver read the PR's state from the forge. Nothing was committed, pushed or claimed done on this round, so no "done" claim was rejected and there is no worktree defect to look for. Whether the new work belongs in a new pull request is a human decision`;
+  const when =
+    evidence?.step === "commit-pr" ? "commit-pr ran again" : `the ${evidence?.step} step started`;
+  return `the cycle's pull request was no longer open when ${when}, so the driver refused before rebuilding or pushing anything:\n${failures.map((f) => `  - ${f}`).join("\n")}\nThe driver read the PR's state from the forge. Nothing was committed, pushed or claimed done on this round, so no "done" claim was rejected and there is no worktree defect to look for. Whether the new work belongs in a new pull request is a human decision`;
 }
 
 /**
@@ -35,6 +39,8 @@ export function explainPrNotOpen(state: WorkState): string | undefined {
  * findings live in pipelineState.verifyEvidence.
  */
 export function explainVerifyFailed(step: string, state: WorkState): string {
+  const prNotOpen = explainPrNotOpen(state);
+  if (prNotOpen) return prNotOpen;
   const evidence = state.pipelineState.verifyEvidence;
   const failures = evidence?.failures ?? [];
   // No recorded failure means this text cannot say which check refused the
