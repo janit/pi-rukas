@@ -211,6 +211,15 @@ const everyKindEvent: WorkEvent[] = [
   },
   { kind: "fence-recovery-started", at: 1, workstreamId: "a", owners: ["b"] },
   { kind: "cycle-interrupted", at: 1, step: "lens-fix", reason: "quit", resumable: true },
+  {
+    kind: "lens-residuals-post-failed",
+    at: 1,
+    round: 1,
+    prNumber: 7,
+    reason: "residual-findings disclosure FAILED: x",
+    issueFallback: "posted",
+    detail: "https://example.invalid/issues/1#issuecomment-1",
+  },
 ];
 
 // The union-derived kind set: the source of truth both directions check

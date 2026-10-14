@@ -36,6 +36,7 @@ import { parkLensFixReposition } from "./work-driver-lens-fix-reposition-park.ts
 import { applyLensVerdict } from "./work-driver-lens-verdicts.ts";
 import { parsePrNumber, runSingleDispatch } from "./work-driver-merged.ts";
 import { DOCTRINE_FILES, type DoctrineDoc, judgePolicy } from "./work-driver-policy.ts";
+import { recordResidualsPost } from "./work-driver-pr-gone.ts";
 import { inlineLensFixPrompt, scratchHygieneSection } from "./work-driver-prompts-late.ts";
 import { scratchDir } from "./work-driver-workspace.ts";
 import { withUsage } from "./workflow-state-events-usage.ts";
@@ -183,7 +184,9 @@ export async function runLens(
       // (driver worktrees are detached; the ledger writer cannot
       // recover the branch name from a detached HEAD).
       branch: ps.branchName,
+      pr: ps.prNumber, // the disclosure goes to this cycle's PR, merged or not
     });
+    next = await recordResidualsPost(ctx, next, summary, round);
     const capKillEvent = lensCapKillEvent(
       summary,
       jobId,
