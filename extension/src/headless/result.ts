@@ -1,7 +1,8 @@
 /**
- * headless/result — the JSON projection of one issue's state file (headless S4,
+ * headless/result — the JSON projection of one issue's WorkState (headless S4,
  * #1024). Pure: reads a WorkState, never writes. `stdout` carries exactly one
- * JSON document built from these projections.
+ * JSON document built from these projections. The WorkState is the run's own
+ * record of the cycle where it has one (#1189, see run.ts).
  */
 
 import type { WorkState } from "../workflow-state.ts";
@@ -11,6 +12,13 @@ export interface StepTiming {
   step: string;
   startedAt: string;
   endedAt: string;
+}
+
+/** A run-level failure carried in the JSON result. */
+export interface RunError {
+  /** `state-diverged`: the state file differs from the run's own record (#1189). */
+  code: "state-diverged";
+  message: string;
 }
 
 export interface IssueResult {
@@ -26,6 +34,8 @@ export interface IssueResult {
   exitCode: number;
   /** Clarification questions (exit 11): the cap's bullet evidence, numbered q1, q2… */
   questions?: string[];
+  /** Set when this issue's state file diverged from the run's record; exitCode is 30. */
+  error?: RunError;
 }
 
 /** `- item` bullet lines of a cap's evidence, in order. */

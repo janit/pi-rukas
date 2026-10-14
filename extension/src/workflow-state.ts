@@ -73,7 +73,7 @@ import { randomUUID } from "node:crypto";
 import { renameSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { type EmitSink, emitPersisted } from "./work-state-emit.ts";
+import { type EmitSink, emitPersisted, lastPersisted } from "./work-state-emit.ts";
 import type { InterruptReason } from "./workflow-state-events.ts";
 import { WORK_STATE_SCHEMA_VERSION, type WorkState } from "./workflow-state-schema.ts";
 import { appendEvent, detectInconsistencies, initialState } from "./workflow-state-update.ts";
@@ -197,15 +197,36 @@ async function writeSnapshot(file: string, state: WorkState, sink?: EmitSink): P
   await fs.mkdir(path.dirname(file), { recursive: true });
   const next = { ...state, updatedAt: Date.now() };
   const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  const body = `${JSON.stringify(next, null, 2)}\n`;
   try {
-    await fs.writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    await fs.writeFile(tmp, body, "utf8");
     await fs.rename(tmp, file);
   } catch (err) {
     await fs.rm(tmp, { force: true }).catch(() => undefined);
     throw err;
   }
-  if (sink) emitPersisted(sink, next);
+  if (sink) {
+    sink.persisted.set(next.issue, body);
+    emitPersisted(sink, next);
+  }
   return next;
+}
+
+/**
+ * The state file's raw bytes, read inside the file's write slot (#1189): no
+ * write is half-done, and every earlier write has recorded its snapshot on its
+ * sink. Undefined when the file does not exist.
+ */
+export function readStateFileSettled(repoRoot: string, issue: number): Promise<string | undefined> {
+  const file = workStateFile(repoRoot, issue);
+  return enqueue(file, async () => {
+    try {
+      return await fs.readFile(file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw err;
+    }
+  });
 }
 
 /**
@@ -285,6 +306,16 @@ export function markInterrupted(
 ): Promise<WorkState | undefined> {
   const file = workStateFile(repoRoot, issue);
   return enqueue(file, async () => {
+    // #1189 — once this cycle has persisted through `sink`, a file that no
+    // longer matches that snapshot is not the cycle's state (something in the
+    // agents' tree rewrote it). Applying the interrupt to it would make the
+    // rewrite the cycle's record, so it is left as it is for the headless
+    // runner to report as diverged.
+    const own = sink?.persisted.get(issue);
+    if (sink && own !== undefined) {
+      const onDisk = await fs.readFile(file, "utf8").catch(() => undefined);
+      if (onDisk !== own) return lastPersisted(sink, issue);
+    }
     const state = await readState(repoRoot, issue);
     if (!state) return undefined;
     const next = applyInterrupt(state, reason, at);

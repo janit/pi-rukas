@@ -36,13 +36,13 @@ import { trace } from "./trace.ts";
 import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { normaliseDeclaredPath } from "./work-driver-verify.ts";
 import { scratchDir } from "./work-driver-workspace.ts";
+import { lastPersisted } from "./work-state-emit.ts";
 import {
   type CapedPartialState,
   type WorkEvent,
   type WorkState,
   type WorkStep,
   persistCycle,
-  readState,
 } from "./workflow-state.ts";
 
 const checkpointExecp = promisify(exec);
@@ -359,30 +359,18 @@ export async function checkpointCapedDispatch(
     ...(reportOnly ? { reportOnly: true } : {}),
     ...(typechecked !== undefined ? { typechecked } : {}),
   };
-  // #544 (8f) — MERGE the checkpoint into the on-disk state file: read the
-  // current file (routeStepOutcome may have written it since this step's
-  // state snapshot), overlay capedPartialState, write once. A crash leaves
-  // either the routed state or the merged state — never a half-state.
-  let merged: WorkState = state;
-  try {
-    const onDisk = await readState(ctx.repoRoot, ctx.issue);
-    if (onDisk) {
-      merged = {
-        ...onDisk,
-        pipelineState: { ...onDisk.pipelineState, capedPartialState: cps },
-      };
-    } else {
-      merged = {
-        ...state,
-        pipelineState: { ...state.pipelineState, capedPartialState: cps },
-      };
-    }
-  } catch (err) {
-    trace(
-      `work-driver: checkpoint state merge fell back to in-memory state: ${(err as Error).message?.slice(0, 120)}`,
-    );
-    merged = { ...state, pipelineState: { ...state.pipelineState, capedPartialState: cps } };
-  }
+  // #544 (8f) — MERGE the checkpoint into the latest persisted state:
+  // routeStepOutcome may have persisted since this step's state snapshot, so
+  // overlay capedPartialState on that, write once. A crash leaves either the
+  // routed state or the merged state — never a half-state. #1189: the latest
+  // persisted state is the cycle's own record on its emit sink, not the file —
+  // the file sits in the agents' tree, and reading it back would let an agent's
+  // edit become the cycle's state.
+  const base = lastPersisted(ctx.emitSink, ctx.issue) ?? state;
+  const merged: WorkState = {
+    ...base,
+    pipelineState: { ...base.pipelineState, capedPartialState: cps },
+  };
   await persistCycle(ctx, merged);
   trace(
     `work-driver: checkpoint for ${step}/${role} (cap=${cap}) — tree=${tree} sha=${commitSha ?? "(none)"} statusFile=${statusFile}`,

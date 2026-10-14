@@ -65,13 +65,10 @@ const SEAMS: Seam[] = [
     canary: { symbol: "piSessionHost", importer: "commands.ts" },
   },
   {
-    // S4a (#1162) — the workflow-state persistence seam. markInterrupted has
-    // no caller until the headless runner's signal handling lands (#1024).
+    // S4a (#1162) — the workflow-state persistence seam. markInterrupted and
+    // readStateFileSettled are called by the headless runner (src/headless/).
     file: "workflow-state.ts",
-    pending: {
-      markInterrupted: "#1024 \u2014 S4 wires SIGTERM/SIGINT to it",
-      requestInterrupt: "#1024 \u2014 set by markInterrupted; has no caller of its own",
-    },
+    pending: {},
     testOnly: {
       writeState:
         "the write primitive behind persistCycle; driver code persists through persistCycle",
@@ -337,6 +334,17 @@ const allFiles = readdirSync(SRC)
     text: stripComments(readFileSync(path.join(SRC, f), "utf8")),
   }));
 
+/**
+ * The headless runner (#1024) lives in src/headless/ and calls seams too.
+ * It counts as a production caller; the orphan check below stays top-level.
+ */
+const headlessFiles = readdirSync(path.join(SRC, "headless"))
+  .filter((f) => f.endsWith(".ts"))
+  .map((f) => ({
+    name: `headless/${f}`,
+    text: stripComments(readFileSync(path.join(SRC, "headless", f), "utf8")),
+  }));
+
 for (const seam of SEAMS) {
   console.log(`\n── ${seam.file}`);
 
@@ -348,7 +356,7 @@ for (const seam of SEAMS) {
   assert(exported.length > 0, `publishes ${exported.length} function(s)/const(s)`);
 
   /** Production sources: everything under src/ except the seam itself. */
-  const production = allFiles.filter((f) => f.name !== seam.file);
+  const production = [...allFiles, ...headlessFiles].filter((f) => f.name !== seam.file);
   const importers = production.filter((f) =>
     new RegExp(`from "\\./${seam.file.replace(".ts", "\\.ts")}"`).test(f.text),
   );

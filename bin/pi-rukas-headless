@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # pi-rukas-headless — run /work cycles without an interactive Pi session (#1024).
 # Execs the TypeScript entry under bun; see extension/src/headless/cli.ts.
+# The image links this file into /usr/local/bin (#1189), so the symlink chain
+# is followed to find the checkout (the same resolver as bin/pi-rukas).
 set -euo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_link="${BASH_SOURCE[0]}"; _hops=0; while [ -L "$_link" ]; do
+  _hops=$(( _hops + 1 )); [ "$_hops" -le 40 ] || { echo "pi-rukas-headless: symlink cycle near $_link" >&2; exit 1; }
+  _tgt="$(readlink "$_link")" || { echo "pi-rukas-headless: failed to resolve symlink chain at $_link" >&2; exit 1; }
+  case "$_tgt" in /*) _link="$_tgt" ;; *) _link="$(cd "$(dirname "$_link")" && pwd -P)/$_tgt" ;; esac; done
+here="$(cd "$(dirname "$_link")" && pwd -P)"
 exec bun "$here/../extension/src/headless/cli.ts" "$@"
