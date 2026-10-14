@@ -36,6 +36,8 @@ import { runDevelopTopological } from "../src/work-develop-topological.ts";
 import type { DriverContext } from "../src/work-driver-context.ts";
 import { type WorkEvent, initialState } from "../src/workflow-state.ts";
 import type { ExecFn } from "../src/worktree.ts";
+import { commandOf } from "./lib/argv-shell.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 const execp = promisify(cpExec);
@@ -49,13 +51,6 @@ function assert(cond: boolean, msg: string) {
   }
 }
 
-const realExec: ExecFn = async (cmd, o) => {
-  const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-    cwd: o?.cwd,
-    maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-  });
-  return { stdout };
-};
 const git = (cwd: string, args: string[]) => execFileP("git", args, { cwd });
 const gitOut = async (cwd: string, args: string[]): Promise<string> =>
   (await git(cwd, args)).stdout.trim();
@@ -179,7 +174,7 @@ function capsOf(events: WorkEvent[]): Array<Extract<WorkEvent, { kind: "cap-hit"
   // this is specifically the OWNER-side precondition failing (case 5's
   // stub failed the reset itself — a different precondition).
   const stubExec: ExecFn = async (cmd, o) => {
-    if (cmd === "git rev-parse HEAD" && o?.cwd === ownerWt) {
+    if (commandOf(cmd, o) === "git rev-parse HEAD" && o?.cwd === ownerWt) {
       const err = new Error("Command failed: git rev-parse HEAD") as Error & {
         stderr: string;
       };
@@ -266,7 +261,7 @@ function capsOf(events: WorkEvent[]): Array<Extract<WorkEvent, { kind: "cap-hit"
   // stub fails `verify-cmd` so gate 2 (the re-run) reports a verify failure.
   const gate2 = { value: false };
   const stubExec: ExecFn = async (cmd, o) => {
-    if (cmd === "verify-cmd" && gate2.value) {
+    if (commandOf(cmd, o) === "verify-cmd" && gate2.value) {
       const err = new Error("Command failed: verify-cmd") as Error & { stderr: string };
       err.stderr = "FAIL: 1 assertion failed (expected green, got red)";
       throw err;

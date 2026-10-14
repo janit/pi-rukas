@@ -58,6 +58,8 @@ import {
   worktreeList,
   worktreePath,
 } from "../src/worktree.ts";
+import { commandOf } from "./lib/argv-shell.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 
@@ -70,18 +72,6 @@ function assert(cond: boolean, msg: string) {
   }
 }
 
-const realExec: ExecFn = async (cmd, o) => {
-  try {
-    const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-      cwd: o?.cwd,
-      maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-    });
-    return { stdout };
-  } catch (e) {
-    const err = e as Error & { stderr?: string };
-    throw new Error(`${err.message}\n${err.stderr ?? ""}`);
-  }
-};
 const git = (cwd: string, args: string[]) => execFileP("git", args, { cwd });
 const gitOut = async (cwd: string, args: string[]): Promise<string> =>
   (await execFileP("git", args, { cwd })).stdout;
@@ -252,8 +242,8 @@ try {
     // residue pass and mechanized setup both run against it), with the
     // branch pre-flight's `gh pr list` short-circuited to "none".
     const execFn: ExecFn = async (cmd, o) => {
-      if (cmd.startsWith("gh ")) return { stdout: "" };
-      if (cmd.startsWith("git fetch")) return { stdout: "" };
+      if (commandOf(cmd, o).startsWith("gh ")) return { stdout: "" };
+      if (commandOf(cmd, o).startsWith("git fetch")) return { stdout: "" };
       return realExec(cmd, o);
     };
     const noopDispatch = async (): Promise<DispatchResult> => ({

@@ -24,6 +24,8 @@ import { promisify } from "node:util";
 import { mechanizedBranchSetup } from "../src/work-driver-branch-mechanized.ts";
 import { integrate, readDirtyPorcelain, restoreRepoRoot } from "../src/work-driver-integrate.ts";
 import type { ExecFn } from "../src/worktree.ts";
+import { commandOf } from "./lib/argv-shell.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 
@@ -36,17 +38,6 @@ function assert(cond: boolean, msg: string) {
     exit = 1;
   }
 }
-
-/** Real shell exec, matching the driver's ExecFn contract. */
-// `sh -c`, matching promisify(exec)'s default. NOT a login shell: `-l` sources
-// profile files that may cd, which would silently run git somewhere else.
-const realExec: ExecFn = async (cmd, o) => {
-  const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-    cwd: o?.cwd,
-    maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-  });
-  return { stdout };
-};
 
 const git = (cwd: string, args: string[]) => execFileP("git", args, { cwd });
 
@@ -452,7 +443,7 @@ try {
     // --count probe that precedes it must run real or the workstream is
     // routed to the patch-fallback path.
     const dropExec: ExecFn = async (cmd, o) => {
-      if (cmd.includes("--reverse") && cmd.includes("rev-list") && o?.cwd === wt4)
+      if (commandOf(cmd, o).includes("--reverse") && commandOf(cmd, o).includes("rev-list") && o?.cwd === wt4)
         throw new Error("simulated rev-list range read failure");
       return realExec(cmd, o);
     };

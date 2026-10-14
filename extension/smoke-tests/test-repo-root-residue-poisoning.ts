@@ -55,6 +55,8 @@ import { runBranch } from "../src/work-driver-branch-develop.ts";
 import type { DriverContext } from "../src/work-driver-context.ts";
 import { runConsolidatedVerify } from "../src/work-driver-consolidated-verify.ts";
 import type { ExecFn } from "../src/worktree.ts";
+import { commandOf } from "./lib/argv-shell.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 
@@ -71,19 +73,6 @@ function assert(cond: boolean, msg: string) {
 // real-git fixtures below keep exercising the (separate) worktree machinery.
 process.env.PI_ENSEMBLE_RESUME = "0";
 process.env.PI_ENSEMBLE_PR_PREFLIGHT = "0";
-
-const realExec: ExecFn = async (cmd, o) => {
-  try {
-    const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-      cwd: o?.cwd,
-      maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-    });
-    return { stdout };
-  } catch (e) {
-    const err = e as Error & { stderr?: string };
-    throw new Error(`${err.message}\n${err.stderr ?? ""}`);
-  }
-};
 
 const git = (cwd: string, args: string[]) => execFileP("git", args, { cwd });
 const gitOut = async (cwd: string, args: string[]): Promise<string> =>
@@ -125,8 +114,8 @@ async function makeRepo(repo: string): Promise<string> {
 /** Injected exec for runBranch: delegates to REAL git, stubs out `gh`. */
 function branchExec(): ExecFn {
   return async (cmd, o) => {
-    if (cmd.startsWith("gh ")) return { stdout: "" };
-    if (cmd.startsWith("git fetch")) return { stdout: "" };
+    if (commandOf(cmd, o).startsWith("gh ")) return { stdout: "" };
+    if (commandOf(cmd, o).startsWith("git fetch")) return { stdout: "" };
     return realExec(cmd, o);
   };
 }
