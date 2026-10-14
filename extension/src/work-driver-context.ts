@@ -202,6 +202,12 @@ export interface DriverContext {
    */
   mergeGrant?: boolean;
   /**
+   * #66 — the invoking session has no UI (`!ctx.hasUI`, e.g. `pi -p`). A
+   * headless cycle opens its PR as a draft by default — nobody is watching
+   * the review window — unless `PI_ENSEMBLE_DRAFT_PR` says otherwise.
+   */
+  headless?: boolean;
+  /**
    * How many cycles this invocation runs at once. Set by the queue; the
    * single-issue path leaves it at 1.
    *

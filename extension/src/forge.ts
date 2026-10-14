@@ -91,7 +91,10 @@ export interface Forge {
     headBranch: string,
     body: string,
     baseBranch?: string,
+    opts?: { draft?: boolean },
   ): Promise<NormalizedPullRequest>;
+  /** #66 — mark a draft PR/MR ready for review (idempotent on a ready one). */
+  prReady(number: number): Promise<void>;
   prMerge(
     number: number,
     method?: "squash" | "merge" | "rebase",
@@ -329,9 +332,9 @@ export function createForge(det: ForgeDetection, opts: CreateForgeOpts = {}): Fo
         });
       }),
 
-    prCreate: (title, headBranch, body, baseBranch) =>
+    prCreate: (title, headBranch, body, baseBranch, opts) =>
       withBodyFile(`pr-${headBranch.slice(0, 16)}`, body, (file) =>
-        run(cmds.prCreateCmd(forge, title, headBranch, file, baseBranch), (stdout) => {
+        run(cmds.prCreateCmd(forge, title, headBranch, file, baseBranch, opts?.draft), (stdout) => {
           // Tolerate both JSON (from --json flag) and plain-text URL responses.
           const parsed = parsePrNumberFromResponse(stdout);
           if (!parsed) {
@@ -356,6 +359,8 @@ export function createForge(det: ForgeDetection, opts: CreateForgeOpts = {}): Fo
 
     prMerge: (number, method: "squash" | "merge" | "rebase" = "squash", subject?: string) =>
       run(cmds.prMergeCmd(forge, number, method, subject), (stdout) => stdout),
+
+    prReady: (number) => run(cmds.prReadyCmd(forge, number), () => undefined),
 
     prDiff: (number) => run(cmds.prDiffCmd(forge, number), (stdout) => stdout),
 

@@ -123,7 +123,7 @@ export function registerWorkTools(pi: ExtensionAPI) {
       }
       // mergeGrant is forced off regardless of what parseWorkArgs derived —
       // nothing an LLM writes can reach it. See the module docstring.
-      const invocation = { ...parsed, mergeGrant: false };
+      const invocation = { ...parsed, mergeGrant: false, headless: !ctx.hasUI };
 
       armPmMode();
       const repoRoot = await resolveRepoRoot(ctx.cwd);

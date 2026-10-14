@@ -24,6 +24,7 @@ import {
 } from "./work-driver-context.ts";
 import { acquireWorkDeckHeader, headerToken } from "./work-driver-deck-header.ts";
 import { countPriorStepStarts } from "./work-driver-diff.ts";
+import { markDraftPrReady } from "./work-driver-draft-pr.ts";
 import { runExplore } from "./work-driver-explore.ts";
 import { runHandoff } from "./work-driver-handoff.ts";
 import { interruptedByShutdown, sessionEnding } from "./work-driver-interrupt.ts";
@@ -100,8 +101,8 @@ async function runStep(ctx: DriverContext, state: WorkState, step: WorkStep): Pr
       return runLensFix(ctx, state, now);
     case "step-back":
       return runStepBack(ctx, state, now);
-    case "ci":
-      return runCi(ctx, state, now);
+    case "ci": // #66 — the review is done: a draft PR is marked ready before CI.
+      return runCi(ctx, await markDraftPrReady(ctx, state), now);
     case "handoff":
       return runHandoff(ctx, state, now);
     case "merged":
