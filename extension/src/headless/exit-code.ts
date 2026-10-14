@@ -1,19 +1,20 @@
 /**
- * headless/exit-code — the exit code of a headless run, derived from the state
- * file (headless S4, #1024). The state file is the authority; the process
- * never reports a status it did not read back.
+ * headless/exit-code — the exit code of a headless run, derived from a
+ * WorkState (headless S4, #1024): the run's own record of the cycle, checked
+ * against the state file (#1189, see run.ts).
  *
  *   0  merged (or completed with nothing to merge)
  *  10  handoff for any cap other than the clarification caps, or awaiting-human-merge
  *  11  handoff whose cap is intent-park or explore-needs-clarification
  *  20  aborted
  *  21  interrupted by a signal
- *  30  the driver threw, or interrupted by the runner's own --timeout
+ *  30  the driver threw, interrupted by the runner's own --timeout, or the state
+ *      file diverged from the run's own record (`error.code: "state-diverged"`)
  *  40  refused to start (claimed by a live cycle, needs-human-attention without
  *      --restart, bad arguments, an unknown flag such as --merge)
  *
- * A grouped run exits 21 if any issue was interrupted, otherwise the highest
- * per-issue code. The JSON result carries every issue regardless.
+ * A run with a diverged state file exits 30. Otherwise a grouped run exits 21 if
+ * any issue was interrupted, else the highest per-issue code. The JSON result carries every issue regardless.
  */
 
 import type { WorkCapLiteral } from "../workflow-state-events-caps.ts";

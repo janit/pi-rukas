@@ -2,7 +2,13 @@
  * headless/run — one-shot /work run on a headless DriverHost (headless S4, #1024).
  *
  * Awaits the compiled driver(s) and returns each issue's exit code, derived from
- * the state file the driver left behind. Interrupts:
+ * this run's own record of the cycle: the last snapshot the driver persisted
+ * through the run's emit sink (#1189). The state file sits in the tree the
+ * agents work in, so it is only compared against that record: if the two
+ * differ, the issue exits 30 with `error.code: "state-diverged"`. An issue this
+ * run persisted nothing for (a refusal, an already-terminated cycle, an issue
+ * no group reached) is reported from the file, the only record there is.
+ * Interrupts:
  *
  *  - SIGTERM / SIGINT / SIGHUP (first one only; later signals are ignored)
  *    abort the cycle's signal with reason `signal`. The driver records the
@@ -32,11 +38,18 @@ import { groupIssues } from "../work-driver-grouping.ts";
 import { releaseHeldIntegrationLocks } from "../work-driver-lock.ts";
 import { type DriverOutcome, runWorkDriver } from "../work-driver.ts";
 import { fetchIssueBodies } from "../work-entry.ts";
-import { createEmitSink } from "../work-state-emit.ts";
-import { interruptReasonOf, markInterrupted, readState, workStateFile } from "../workflow-state.ts";
+import { type EmitSink, createEmitSink, lastPersisted } from "../work-state-emit.ts";
+import {
+  type WorkState,
+  interruptReasonOf,
+  markInterrupted,
+  readState,
+  readStateFileSettled,
+  workStateFile,
+} from "../workflow-state.ts";
 import { EXIT, exitCodeForGroup, exitCodeForState } from "./exit-code.ts";
 import { type LineWriter, createHeadlessHost } from "./host.ts";
-import { type IssueResult, projectIssue } from "./result.ts";
+import { type IssueResult, type RunError, projectIssue } from "./result.ts";
 
 export interface HeadlessRunOptions {
   repoRoot: string;
@@ -56,6 +69,8 @@ export interface HeadlessRunOptions {
 export interface HeadlessRunResult {
   exitCode: number;
   results: IssueResult[];
+  /** Set when an issue's state file diverged from this run's record (exit 30). */
+  error?: RunError;
 }
 
 const DEFAULT_GRACE_MS = 10_000;
@@ -120,8 +135,44 @@ export async function runHeadless(opts: HeadlessRunOptions): Promise<HeadlessRun
   for (const issue of unrun) {
     results.push(await unrunResult(opts.repoRoot, issue, interruptCode));
   }
+  // A diverged state file outranks every other outcome: the run cannot vouch
+  // for what the file says, so it reports the failure rather than a status.
+  const diverged = results.find((r) => r.error !== undefined)?.error;
+  if (diverged) return { exitCode: EXIT.crash, results, error: diverged };
   if (unrun.length > 0) return { exitCode: interruptCode, results };
   return { exitCode: exitCodeForGroup(codes), results };
+}
+
+/**
+ * #1189 — this run's record of `issue`: the last snapshot persisted through
+ * `sink`, compared byte for byte with the state file (read inside the file's
+ * write slot, so no write is half-done). Undefined when this run persisted
+ * nothing for the issue.
+ */
+async function ownRecord(
+  repoRoot: string,
+  issue: number,
+  sink: EmitSink,
+): Promise<{ state: WorkState; diverged?: string } | undefined> {
+  if (!sink.persisted.has(issue)) return undefined;
+  let onDisk: string | undefined;
+  let readError: string | undefined;
+  try {
+    onDisk = await readStateFileSettled(repoRoot, issue);
+  } catch (err) {
+    readError = errorMessage(err);
+  }
+  // Taken after the settled read: a late driver write queued ahead of it is
+  // both what the file holds and what the record says.
+  const state = lastPersisted(sink, issue) as WorkState;
+  if (readError !== undefined) {
+    return { state, diverged: `the state file could not be read: ${readError}` };
+  }
+  if (onDisk === undefined) return { state, diverged: "the state file is missing" };
+  if (onDisk !== sink.persisted.get(issue)) {
+    return { state, diverged: "the state file differs from the last snapshot this run persisted" };
+  }
+  return { state };
 }
 
 /** An issue no group reached: its state file's status if one exists, else not-started. */
@@ -219,8 +270,8 @@ async function runGroup(
     // The driver missed its boundary: record the interrupt from here (a no-op
     // on a terminal status), then give a driver that was mid-step a bounded
     // moment to finish its persist before the state is read back.
-    // A failed record must not stop the read-back below: the state file is the
-    // authority, and whatever it says is what the exit code reports.
+    // A failed record must not stop the read-back below: the exit code reports
+    // whatever this run's record says, checked against the file.
     try {
       await markInterrupted(opts.repoRoot, primary, interruptReasonOf(signal), sink);
     } catch (err) {
@@ -240,9 +291,14 @@ async function runGroup(
   // the state is already terminal and decided its own code.
   const expiredCode = signal.reason === "timeout" ? EXIT.crash : EXIT.interrupted;
   const codes: number[] = [];
+  // A grouped cycle keeps one record, the primary's: the driver writes no state
+  // file for the other members. When this run has that record, every member is
+  // reported from it; a member's own file could only have been written by
+  // something else (#1189).
+  const own = await ownRecord(opts.repoRoot, primary, sink);
   for (const issue of group) {
-    const file = workStateFile(opts.repoRoot, issue);
-    const state = await readState(opts.repoRoot, issue);
+    const file = workStateFile(opts.repoRoot, own ? primary : issue);
+    const state = own ? { ...own.state, issue } : await readState(opts.repoRoot, issue);
     if (!state) {
       // No state file: the driver never reached its first persist. Reported as
       // not-started, never as a fabricated status.
@@ -267,6 +323,13 @@ async function runGroup(
       code = expiredCode;
     } else if (refusedHere) code = EXIT.refused;
     else code = exitCodeForState(state);
+    if (own?.diverged !== undefined) {
+      code = EXIT.crash;
+      projected.error = {
+        code: "state-diverged",
+        message: `issue #${primary}: ${own.diverged} (${file})`,
+      };
+    }
     projected.exitCode = code;
     results.push(projected);
     codes.push(code);

@@ -18,7 +18,10 @@
  *        into the checkpoint commit and are counted in the status file.
  *
  * Real git repo, no dispatches — the cap kill is recorded directly on the
- * state file the checkpoint reads.
+ * state passed to the checkpoint.
+ *
+ * #1189: the checkpoint merges onto the last snapshot persisted through the
+ * cycle's emit sink, never onto the state file, which an agent can edit.
  */
 
 import { execFileSync } from "node:child_process";
@@ -27,7 +30,14 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkpointCapedDispatch } from "../src/work-driver-cap-checkpoint.ts";
-import { initialState, writeState } from "../src/workflow-state.ts";
+import { createEmitSink } from "../src/work-state-emit.ts";
+import {
+  appendEvent,
+  initialState,
+  readState,
+  workStateFile,
+  writeState,
+} from "../src/workflow-state.ts";
 
 let exit = 0;
 function assert(cond: boolean, msg: string) {
@@ -108,7 +118,7 @@ const fakePi = { sendUserMessage: () => {} } as unknown as ExtensionAPI;
       },
     };
     await writeState(repo, s);
-    const ctx = { host: fakePi, repoRoot: repo, issue: 9901 } as unknown as Parameters<
+    const ctx = { host: fakePi, repoRoot: repo, emitSink: createEmitSink(() => undefined), issue: 9901 } as unknown as Parameters<
       typeof checkpointCapedDispatch
     >[0];
     const out = await checkpointCapedDispatch(ctx, s, "develop");
@@ -144,7 +154,7 @@ const fakePi = { sendUserMessage: () => {} } as unknown as ExtensionAPI;
     writeFileSync(path.join(repo, "foreign-untracked.txt"), "foreign\n");
     const s = capKillState(repo, 9902);
     await writeState(repo, s);
-    const ctx = { host: fakePi, repoRoot: repo, issue: 9902 } as unknown as Parameters<
+    const ctx = { host: fakePi, repoRoot: repo, emitSink: createEmitSink(() => undefined), issue: 9902 } as unknown as Parameters<
       typeof checkpointCapedDispatch
     >[0];
     const out = await checkpointCapedDispatch(ctx, s, "develop");
@@ -197,7 +207,7 @@ const fakePi = { sendUserMessage: () => {} } as unknown as ExtensionAPI;
     };
     await writeState(repo, s);
     const before = git(repo, "rev-parse", "HEAD");
-    const ctx = { host: fakePi, repoRoot: repo, issue: 9903 } as unknown as Parameters<
+    const ctx = { host: fakePi, repoRoot: repo, emitSink: createEmitSink(() => undefined), issue: 9903 } as unknown as Parameters<
       typeof checkpointCapedDispatch
     >[0];
     const out = await checkpointCapedDispatch(ctx, s, "lens-review");
@@ -227,7 +237,7 @@ const fakePi = { sendUserMessage: () => {} } as unknown as ExtensionAPI;
     writeFileSync(path.join(repo, "zz-new.ts"), "new\n");
     const s = capKillState(repo, 9904);
     await writeState(repo, s);
-    const ctx = { host: fakePi, repoRoot: repo, issue: 9904 } as unknown as Parameters<
+    const ctx = { host: fakePi, repoRoot: repo, emitSink: createEmitSink(() => undefined), issue: 9904 } as unknown as Parameters<
       typeof checkpointCapedDispatch
     >[0];
     const out = await checkpointCapedDispatch(ctx, s, "develop");
@@ -235,6 +245,34 @@ const fakePi = { sendUserMessage: () => {} } as unknown as ExtensionAPI;
     const committed = git(repo, "show", "--name-only", "--format=", "HEAD").split("\n");
     assert(committed.includes("seed.txt"), "#3: the first ` M` record is committed whole");
     assert(committed.includes("zz-new.ts"), "#3: the later record is committed too");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
+// ---- #1189: the checkpoint builds on the cycle's own record, not the file.
+{
+  const repo = makeRepo();
+  try {
+    const sink = createEmitSink(() => undefined);
+    const older = capKillState(repo, 9905);
+    // routeStepOutcome persisted a newer state after the step's snapshot.
+    const newer = appendEvent(older, { kind: "step-started", at: Date.now(), step: "develop" });
+    await writeState(repo, newer, sink);
+    // An agent rewrites the file in the tree it works in.
+    const forged = { ...newer, pipelineState: { ...newer.pipelineState, status: "merged" } };
+    writeFileSync(workStateFile(repo, 9905), `${JSON.stringify(forged, null, 2)}\n`);
+    const ctx = { host: fakePi, repoRoot: repo, emitSink: sink, issue: 9905 } as unknown as Parameters<
+      typeof checkpointCapedDispatch
+    >[0];
+    const out = await checkpointCapedDispatch(ctx, older, "develop");
+    assert(out.pipelineState.status === "running", "#1189: a forged file status is not adopted");
+    assert(
+      out.eventLog.length === newer.eventLog.length,
+      "#1189: the newer persisted snapshot is still the merge base (#544)",
+    );
+    const onDisk = await readState(repo, 9905);
+    assert(onDisk?.pipelineState.status === "running", "#1189: the forged status is overwritten");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

@@ -184,6 +184,11 @@ RUN npm install -g --ignore-scripts wigolo@0.2.1 || true
 ENV PI_ENSEMBLE_DIR=/opt/pi-rukas
 COPY --chown=vscode:vscode . ${PI_ENSEMBLE_DIR}
 
+# The headless /work runner on PATH (#1189), so a caller running it as the
+# container's command does not hard-code the image layout. The wrapper follows
+# the link back to ${PI_ENSEMBLE_DIR}.
+RUN ln -s ${PI_ENSEMBLE_DIR}/bin/pi-rukas-headless /usr/local/bin/pi-rukas-headless
+
 # Drop to vscode user for state setup — install.sh creates symlinks under
 # ~/.pi/agent/ + writes the codebase_memory MCP entry into ~/.pi/agent/mcp.json
 # (native MCP, user's home, not root).

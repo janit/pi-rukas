@@ -9,7 +9,8 @@
  *
  * stderr: NDJSON v1 progress lines (ndjson.ts). stdout: one summary line, or
  * with --json exactly one JSON document. The exit code is derived from the
- * state file (exit-code.ts).
+ * run's own record of the cycle, checked against the state file (run.ts,
+ * exit-code.ts); a mismatch exits 30 with `error.code: "state-diverged"`.
  *
  * Ctrl-C (SIGINT) and SIGTERM interrupt the cycle: the driver records
  * `interrupted` at its next step boundary, and every child it started is killed
@@ -87,9 +88,16 @@ async function main(argv: string[]): Promise<number> {
     write: (line) => process.stderr.write(`${line}\n`),
   });
   if (args.json) {
-    process.stdout.write(`${JSON.stringify({ exitCode: run.exitCode, issues: run.results })}\n`);
+    const doc = {
+      exitCode: run.exitCode,
+      issues: run.results,
+      ...(run.error ? { error: run.error } : {}),
+    };
+    process.stdout.write(`${JSON.stringify(doc)}\n`);
   } else {
-    const parts = run.results.map((r) => `#${r.issue} ${r.status} (exit ${r.exitCode})`);
+    const parts = run.results.map(
+      (r) => `#${r.issue} ${r.error ? r.error.code : r.status} (exit ${r.exitCode})`,
+    );
     process.stdout.write(`pi-rukas-headless: ${parts.join(", ") || "nothing ran"}\n`);
   }
   return run.exitCode;

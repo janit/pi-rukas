@@ -31,6 +31,14 @@
  * Sink isolation: each emit call is guarded. A throwing sink is traced and the
  * watermark still advances, so the same event is never re-emitted and the
  * following events are still delivered on the next persist.
+ *
+ * ## The cycle's own record (#1189)
+ *
+ * The sink also keeps the exact bytes of the last snapshot written through it,
+ * per issue (`persisted`). The state file lives in the tree the agents work
+ * in, so anything that must not be steerable by an agent reads this record
+ * instead of the file: the headless runner's result, and the driver's
+ * read-modify-write of a cap checkpoint. Resume still reads the file.
  */
 
 import { trace } from "./trace.ts";
@@ -42,11 +50,19 @@ export interface EmitSink {
   emit: (event: WorkEvent, index: number) => void;
   /** One fingerprint per emitted eventLog entry, in log order. Its length is the watermark. */
   fingerprints: string[];
+  /** The serialised file body of the last snapshot written through this sink, per issue. */
+  persisted: Map<number, string>;
 }
 
 /** A fresh sink for one cycle. The watermark starts empty. */
 export function createEmitSink(emit: (event: WorkEvent, index: number) => void): EmitSink {
-  return { emit, fingerprints: [] };
+  return { emit, fingerprints: [], persisted: new Map() };
+}
+
+/** The last snapshot of `issue` written through `sink`, or undefined when none was. */
+export function lastPersisted(sink: EmitSink, issue: number): WorkState | undefined {
+  const body = sink.persisted.get(issue);
+  return body === undefined ? undefined : (JSON.parse(body) as WorkState);
 }
 
 function fingerprint(event: WorkEvent, index: number): string {
