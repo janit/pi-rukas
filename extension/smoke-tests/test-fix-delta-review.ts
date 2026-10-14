@@ -199,7 +199,7 @@ const BROKEN = GOOD.replace("drawMeter(view.meter)", "drawMeter(meter)");
     const deltas: Array<string | undefined> = [];
     const diffs: string[] = [];
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 52,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),

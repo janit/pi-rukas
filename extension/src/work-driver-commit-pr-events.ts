@@ -11,6 +11,10 @@
  */
 
 import { trace } from "./trace.ts";
+import {
+  recordAcceptanceCoverage,
+  runAcceptanceCoverageGate,
+} from "./work-driver-acceptance-coverage.ts";
 import { raiseConsolidationIncompleteCap } from "./work-driver-commit-completeness.ts";
 import type { CommitPrRootInspect } from "./work-driver-commit-inspect.ts";
 import { inspectCommitPrRoot } from "./work-driver-commit-inspect.ts";
@@ -46,7 +50,10 @@ export async function runCommitPrPostDispatchGates(
   const rootState = await inspectCommitPrRoot(execFn, ctx.repoRoot);
   let state: WorkState = {
     ...next,
-    pipelineState: { ...next.pipelineState, ...commitPrRootFieldsOf(rootState) },
+    pipelineState: {
+      ...next.pipelineState,
+      ...commitPrRootFieldsOf(rootState),
+    },
   };
   const prNumber = parsePrNumber(last.summary);
   if (prNumber !== undefined) {
@@ -56,6 +63,7 @@ export async function runCommitPrPostDispatchGates(
     return raiseConsolidationIncompleteCap(state);
   }
   const consolidationCheck = await verifyConsolidation(ctx, state);
+  for (const note of consolidationCheck.notes) trace(`work-driver: ${note}`);
   if (consolidationCheck.missing.length > 0) {
     trace(
       `work-driver: commit-pr partial-consolidation detected — missing workstreams: ${consolidationCheck.missing.map((m) => m.id).join(", ")}`,
@@ -106,7 +114,10 @@ export async function runCommitPrPostDispatchGates(
       ...state,
       pipelineState: {
         ...state.pipelineState,
-        incompleteConsolidation: { verdicts, filesPresent: consolidationCheck.filesPresent },
+        incompleteConsolidation: {
+          verdicts,
+          filesPresent: consolidationCheck.filesPresent,
+        },
       },
     };
     return appendEvent(state, {
@@ -146,8 +157,17 @@ export async function runCommitPrPostDispatchGates(
       reviewRound: state.pipelineState.reviewRound,
       nextStep: "handoff",
     });
+    return state;
   }
-  return state;
+  // #1137 — the whole-issue acceptance-coverage check, ONCE on the
+  // consolidated diff (never per workstream — the per-workstream review is
+  // scoped to its own paths by the adversarial prompt). A criterion no
+  // workstream delivered is flagged here, after the PR is open, so the
+  // operator sees exactly what was not delivered. The gate degrades to a
+  // skip (scope unknown) when it cannot read the diff or no criteria are
+  // recorded — it never fails on whole-issue criteria it could not judge.
+  const coverage = await runAcceptanceCoverageGate(ctx, state);
+  return coverage ? recordAcceptanceCoverage(state, coverage) : state;
 }
 
 /**
@@ -172,7 +192,10 @@ export function finalizeCommitPrState(
   prAlreadyOpen = false,
 ): WorkState {
   let next = appendEvent(
-    { ...state, pipelineState: { ...state.pipelineState, currentStep: "commit-pr" } },
+    {
+      ...state,
+      pipelineState: { ...state.pipelineState, currentStep: "commit-pr" },
+    },
     { kind: "step-started", step: "commit-pr", at: now },
   );
   // #782 — the commit-pr consolidated verify recovered from a flake: emit

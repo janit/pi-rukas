@@ -166,7 +166,7 @@ async function captureStderr(fn: () => Promise<unknown>): Promise<string[]> {
     const labels: string[] = [];
     let shuttingDown = true;
     const ctx: DriverContext = {
-      pi: fake.pi,
+      host: fake.pi,
       repoRoot: dir,
       issue,
       issueBodyFetcherFn: mockIssueBodyOk,
@@ -246,7 +246,7 @@ async function captureStderr(fn: () => Promise<unknown>): Promise<string[]> {
     shuttingDown = false;
     labels.length = 0;
     const next = makeFakePi();
-    await runWorkDriver({ ...ctx, pi: next.pi }).catch(() => {});
+    await runWorkDriver({ ...ctx, host: next.pi }).catch(() => {});
     const resumed = await readState(dir, issue);
     assert(
       next.sent.some((m) => m.includes("kind=resume")),
@@ -278,7 +278,7 @@ async function captureStderr(fn: () => Promise<unknown>): Promise<string[]> {
     const fake = makeFakePi();
     const labels: string[] = [];
     const ctx: DriverContext = {
-      pi: fake.pi,
+      host: fake.pi,
       repoRoot: dir,
       issue,
       issueBodyFetcherFn: mockIssueBodyOk,
@@ -329,7 +329,7 @@ async function captureStderr(fn: () => Promise<unknown>): Promise<string[]> {
     };
     await writeState(dir, boundary);
     const fake = makeFakePi();
-    const ctx: DriverContext = { pi: fake.pi, repoRoot: dir, issue };
+    const ctx: DriverContext = { host: fake.pi, repoRoot: dir, issue };
     assert(
       interruptedByShutdown(ctx, boundary, "lens-review") === false,
       "C: a live session interrupts nothing",
@@ -378,7 +378,7 @@ async function captureStderr(fn: () => Promise<unknown>): Promise<string[]> {
     fake.quit();
     let dispatched = 0;
     const outcome = await runWorkDriver({
-      pi: fake.pi,
+      host: fake.pi,
       repoRoot: dir,
       issue: 583,
       issueBodyFetcherFn: mockIssueBodyOk,

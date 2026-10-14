@@ -16,6 +16,8 @@ export function shellOnlyEscapes(source: string): string[] {
     lines.forEach((line, i) => {
       const code = line.trim();
       if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) return;
+      // An import names another module's binding, not this promisified one.
+      if (code.startsWith("import ")) return;
       if (/=\s*promisify\(/.test(code)) return;
       if (use.test(code)) escapes.push(`${i + 1}: ${code}`);
     });
@@ -65,7 +67,8 @@ export function argvDroppingFakes(source: string): string[] {
     const [head, cmd, optsType = ""] = m;
     if (/^\s*:\s*string\s*$/.test(optsType)) continue;
     const body = arrowBody(source, (m.index ?? 0) + head.length);
-    const toShell = new RegExp(`"-c",\\s*${cmd}\\b|\\b(?:${shells.join("|")})\\(\\s*${cmd}\\s*[,)]`);
+    // `(?<!\.)`: a method call (`re.exec(line)`) is not node's `exec`.
+    const toShell = new RegExp(`"-c",\\s*${cmd}\\b|(?<!\\.)\\b(?:${shells.join("|")})\\(\\s*${cmd}\\s*[,)]`);
     if (!toShell.test(body) || /\bargv\b|\bcommandOf\b|\basShellForm\b/.test(body)) continue;
     const line = source.slice(0, m.index).split("\n").length;
     found.push(`${line}: ${(source.split("\n")[line - 1] ?? "").trim()}`);

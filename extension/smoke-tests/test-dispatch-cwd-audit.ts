@@ -89,7 +89,7 @@ const ROOT_INTENTIONAL_SITES: Array<{ file: string; site: RegExp; label: string;
     file: "work-driver-explore-dispatch.ts",
     // #799 — runExplore (and its dispatch) lives in work-driver-explore-dispatch.ts (#1094 split it out of work-driver-explore-run.ts).
     // A comment sits between the prompt and the opts object, so match across it.
-    site: /dispatch\(\s*ctx\.pi,\s*\{\s*role:\s*"explore",\s*prompt\s*\},[\s\S]{0,400}?label:\s*"explore",\s*onSlow:/,
+    site: /dispatch\(\s*ctx\.host,\s*\{\s*role:\s*"explore",\s*prompt\s*\},[\s\S]{0,400}?label:\s*"explore",\s*onSlow:/,
     label: "explore (label: explore) — runExplore",
     why: "reads the issue and the code at the integration point before any worktree exists",
   },
@@ -122,7 +122,7 @@ const ROOT_INTENTIONAL_SITES: Array<{ file: string; site: RegExp; label: string;
   },
   {
     file: "work-driver-handoff-ops.ts",
-    site: /dispatch\(\s*ctx\.pi,\s*\{\s*role:\s*"ops",\s*prompt\s*\},\s*\{\s*label:\s*"ops:handoff"/,
+    site: /dispatch\(\s*ctx\.host,\s*\{\s*role:\s*"ops",\s*prompt\s*\},\s*\{\s*label:\s*"ops:handoff"/,
     label: "handoff (ops:handoff)",
     why: "posts the handoff comment to the forge; the cycle's trees are torn down or parked and the operator is being told where to look",
   },
@@ -142,14 +142,14 @@ for (const { file, site, label, why } of ROOT_INTENTIONAL_SITES) {
   // The developer dispatch and the speculative-explore dispatch both thread
   // the caller's `cwd` onto their DispatchSpecs.
   const devDispatch = run.match(
-    /dispatch\(\s*ctx\.pi,\s*\{[\s\S]*?cwd,\s*\},\s*\{[\s\S]*?label:\s*developerLabel[\s\S]*?deck:\s*\{[\s\S]*?\}\s*,?\s*\)/,
+    /dispatch\(\s*ctx\.host,\s*\{[\s\S]*?cwd,\s*\},\s*\{[\s\S]*?label:\s*developerLabel[\s\S]*?deck:\s*\{[\s\S]*?\}\s*,?\s*\)/,
   );
   assert(
     devDispatch !== null,
     "canary: the developer dispatch in makeRunOneWorkstream carries the explicit cwd (its VALUE must never be a fallback — sibling audit)",
   );
   const specDispatch = run.match(
-    /dispatch\(\s*ctx\.pi,\s*\{[\s\S]{0,400}?cwd,\s*\},\s*\{\s*label:[\s\S]{0,120}?explore:speculative/,
+    /dispatch\(\s*ctx\.host,\s*\{[\s\S]{0,400}?cwd,\s*\},\s*\{\s*label:[\s\S]{0,120}?explore:speculative/,
   );
   assert(
     specDispatch !== null,
@@ -283,7 +283,7 @@ for (const { file, site, label, why } of ROOT_INTENTIONAL_SITES) {
     "work-develop-run.ts": 2, // developer + speculative explore (dependents go through runOneWorkstream)
     "work-driver-converge-gate.ts": 1, // the corrective re-dispatch
     "work-driver-lens.ts": 1, // the lens-fix runSingleDispatch (the review is an exec)
-    "adversarial.ts": 1, // runPhase's inner spawn — cwd threaded by the fan-out
+    "adversarial-phase.ts": 1, // makeRunPhase's inner spawn — cwd threaded by the fan-out
     "lens-review-child.ts": 1, // the lens child — cwd: runOpts.cwd, set by the lens review seam
     "work-driver-explore-dispatch.ts": 1, // runExplore (the integration-point read, no cwd)
     "work-driver-commit-fallback.ts": 1, // #861 — the ops-fallback commit-pr dispatch, pinned to the integrate worktree (cwd: integratePath)

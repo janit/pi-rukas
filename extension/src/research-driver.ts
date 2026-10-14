@@ -26,7 +26,6 @@ import { exec } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { dispatchCore } from "./dispatch.ts";
 import {
   VIPUNE_PRECEDENCE_NOTE,
@@ -36,6 +35,7 @@ import {
   renderPriorContext,
 } from "./plan-draft.ts";
 import { PLAN_DISPATCH_TIMEOUT_MS, PLAN_MARKER_CHILD_ARGS } from "./plan-investigate.ts";
+import { OPERATOR_SOURCE } from "./plan-prior-context.ts";
 import { reporterPathFromArgs, statReporterPath } from "./reporter-preflight.ts";
 import { anglesForTier } from "./research-angles.ts";
 import {
@@ -77,6 +77,7 @@ import {
 } from "./research-verify.ts";
 import { trace } from "./trace.ts";
 import { vipuneSearch } from "./vipune.ts";
+import type { DriverHost } from "./work-driver-host.ts";
 import type { ExecFn } from "./worktree.ts";
 
 const execp = promisify(exec);
@@ -121,7 +122,7 @@ export interface ResearchDeps {
 }
 
 export async function runResearchPipeline(
-  pi: ExtensionAPI,
+  pi: DriverHost,
   input: ResearchDriverInput,
   repoRoot: string,
   deps: ResearchDeps = {},
@@ -156,7 +157,7 @@ export async function runResearchPipeline(
         : [];
     if (input.context?.trim()) {
       for (const line of input.context.trim().split("\n")) {
-        if (line.trim()) prior.push({ source: "context param", fact: line.trim() });
+        if (line.trim()) prior.push({ source: OPERATOR_SOURCE, fact: line.trim() });
       }
     }
     return prior;

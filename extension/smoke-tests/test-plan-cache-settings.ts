@@ -246,29 +246,35 @@ for (const bad of ["-1", "abc", "1.5", "1e400"]) {
   const cloneB = path.join(root, "b");
   const other = path.join(root, "other");
   const shared = path.join(root, "shared-cache");
-  for (const d of [cloneA, other]) {
+  const seed = path.join(root, "seed");
+  for (const d of [seed, other]) {
     execFileSync("git", ["init", "-q", d]);
     git(d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x");
   }
-  execFileSync("git", ["clone", "-q", cloneA, cloneB]);
-  git(cloneA, "remote", "add", "origin", "https://example.test/one.git");
-  git(cloneB, "remote", "set-url", "origin", "https://example.test/one.git");
+  // Both clones carry one origin URL (it keys the shared dir) and fetch it
+  // from the seed, since the pipeline fetches origin/<default> for its base.
+  for (const c of [cloneA, cloneB]) {
+    execFileSync("git", ["clone", "-q", seed, c]);
+    git(c, "remote", "set-url", "origin", "https://example.test/one.git");
+    git(c, "config", `url.${seed}.insteadOf`, "https://example.test/one.git");
+  }
   git(other, "remote", "add", "origin", "https://example.test/two.git");
+  const baseOf = (d: string) => ({ baseSha: git(d, "rev-parse", "HEAD") });
 
   const priorCache = process.env.PI_ENSEMBLE_PLAN_CACHE;
   delete process.env.PI_ENSEMBLE_PLAN_CACHE; // verify-loop.sh disables the real lookup
   setPlanGitStateFn(null);
   process.env.PI_ENSEMBLE_PLAN_CACHE_DIR = shared;
-  const a = await resolvePlanGitState(cloneA);
-  const b = await resolvePlanGitState(cloneB);
-  const o = await resolvePlanGitState(other);
+  const a = await resolvePlanGitState(cloneA, baseOf(cloneA));
+  const b = await resolvePlanGitState(cloneB, baseOf(cloneB));
+  const o = await resolvePlanGitState(other, baseOf(other));
   assert(
     !!a && a.cacheDir.startsWith(`${shared}${path.sep}`),
     "(3) the cache dir is under PI_ENSEMBLE_PLAN_CACHE_DIR",
   );
   assert(!!a && !!b && a.cacheDir === b.cacheDir, "(3) two clones of one repository share it");
   assert(!!a && !!o && a.cacheDir !== o.cacheDir, "(3) another repository gets its own subdir");
-  assert(!!a && !!b && a.head === b.head, "fixture: both clones are at the same HEAD");
+  assert(!!a && !!b && a.keySha === b.keySha, "fixture: both clones are at the same HEAD");
 
   // End to end: dry run in clone A, confirm from clone B (a fresh clone per turn).
   forgeStub.created.length = 0;
@@ -286,7 +292,7 @@ for (const bad of ["-1", "abc", "1.5", "1e400"]) {
   );
 
   process.env.PI_ENSEMBLE_PLAN_CACHE_DIR = "relative/cache";
-  const rel = await resolvePlanGitState(cloneA);
+  const rel = await resolvePlanGitState(cloneA, baseOf(cloneA));
   assert(
     !!rel &&
       rel.cacheDir ===

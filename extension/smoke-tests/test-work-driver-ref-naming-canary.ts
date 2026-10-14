@@ -60,6 +60,8 @@ async function setupFixture(): Promise<{ root: string; branch: string }> {
   await execFileP("git", ["init", "-q", "--bare", "--initial-branch=main", origin]);
   await execFileP("git", ["remote", "add", "origin", origin], { cwd: repo });
   await execFileP("git", ["push", "-q", "origin", "main"], { cwd: repo });
+  // A real clone carries refs/remotes/origin/HEAD; the mainline is resolved from it (#1134).
+  await execFileP("git", ["remote", "set-head", "origin", "main"], { cwd: repo });
 
   // Feature branch with ZERO commits ahead of main (just a branch point).
   const branch = "feature/issue-451-canary";
@@ -96,7 +98,7 @@ async function testCommitPrGate() {
     };
 
     const ctx: DriverContext = {
-      pi: {} as ExtensionAPI,
+      host: {} as ExtensionAPI,
       repoRoot: root,
       issue: 451,
       issueBodyFetcherFn: () => ({ stdout: "canary test" }),
@@ -173,7 +175,7 @@ async function testCommitPrGatePasses() {
     };
 
     const ctx: DriverContext = {
-      pi: {} as ExtensionAPI,
+      host: {} as ExtensionAPI,
       repoRoot: repo,
       issue: 453,
       issueBodyFetcherFn: () => ({ stdout: "canary pass test" }),
@@ -232,7 +234,7 @@ async function testConsolidationZeroCommits() {
     };
 
     const ctx: DriverContext = {
-      pi: {} as ExtensionAPI,
+      host: {} as ExtensionAPI,
       repoRoot: root,
       issue: 455,
       issueBodyFetcherFn: () => ({ stdout: "consolidation test" }),
@@ -276,6 +278,8 @@ async function testConsolidationWithCommits() {
   await execFileP("git", ["init", "-q", "--bare", "--initial-branch=main", origin]);
   await execFileP("git", ["remote", "add", "origin", origin], { cwd: repo });
   await execFileP("git", ["push", "-q", "origin", "main"], { cwd: repo });
+  // A real clone carries refs/remotes/origin/HEAD; the mainline is resolved from it (#1134).
+  await execFileP("git", ["remote", "set-head", "origin", "main"], { cwd: repo });
 
   // Feature branch with commits touching both files.
   const branch = "feature/issue-451-consol-pass";
@@ -315,7 +319,7 @@ async function testConsolidationWithCommits() {
     };
 
     const ctx: DriverContext = {
-      pi: {} as ExtensionAPI,
+      host: {} as ExtensionAPI,
       repoRoot: repo,
       issue: 457,
       issueBodyFetcherFn: () => ({ stdout: "consolidation pass test" }),

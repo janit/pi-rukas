@@ -115,7 +115,7 @@ export function interruptedByShutdown(ctx: DriverContext, state: WorkState, step
   else {
     try {
       notifyAgent(
-        ctx.pi,
+        ctx.host,
         `pi-rukas:driver-event v1 kind=interrupted issue=${ctx.issue} at=${new Date().toISOString()}\npi-rukas: /work ${line}`,
       );
     } catch {

@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { integrate } from "../src/work-driver-integrate.ts";
-import type { ExecFn } from "../src/worktree.ts";
+import { realExec } from "./lib/restore-start-ref-fixtures.ts";
 
 const execFileP = promisify(execFile);
 

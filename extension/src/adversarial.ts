@@ -1,29 +1,40 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { classifyDispatchOutcome } from "./adversarial-classify.ts";
+import {
+  type FenceRecord,
+  type FencedRound,
+  type FixFence,
+  createFixFence,
+  withFixViolations,
+} from "./adversarial-fix-guard.ts";
 import { buildLedgerNote } from "./adversarial-ledger-note.ts";
 import { writeAdversarialLedgerEntry } from "./adversarial-ledger.ts";
-import { buildAdversarialPrompt, buildFixPrompt } from "./adversarial-prompts.ts";
+import type { AdversarialLoopParams } from "./adversarial-params.ts";
+import { makeRunPhase } from "./adversarial-phase.ts";
+import {
+  type SiblingScope,
+  buildAdversarialPrompt,
+  buildFixPrompt,
+} from "./adversarial-prompts.ts";
 import { type InfraCtx, infraFailureResult, runPhaseWithInfraRetry } from "./adversarial-retry.ts";
 import {
   decideLoopAction,
+  fixRefusedResult,
+  fixThrewResult,
   parseVerdict,
   summariseFindings,
   synthesizeResult,
   toRoundRecords,
+  workCwdRequiredResult,
 } from "./adversarial-verdict.ts";
-import { childHandles, registerChildHandle } from "./async-jobs-registry.ts";
-import { markOrchestrator, setOrchestratorActiveChild } from "./async-jobs.ts";
+import { markOrchestrator } from "./async-jobs.ts";
 import { formatReportLine, renderCommentEvidence, roundComments } from "./comment-evidence.ts";
 import type { LostCommentResult } from "./comment-retention.ts";
-import * as dispatchDeck from "./dispatch-deck.ts";
-import type { PiJsonEvent } from "./pi-event-shapes.ts";
-import { readEnumMarker } from "./reply-markers.ts";
 import { type RangeDiff, computeRangeDiff } from "./review-diff.ts";
-import { type OnSlowCallback, feedSlowProgress, watchSlowDispatch } from "./slow-notice.ts";
-import { makeRunId, spawnSpecialist } from "./spawn.ts";
+import type { OnSlowCallback } from "./slow-notice.ts";
+import { makeRunId } from "./spawn.ts";
 import { trace } from "./trace.ts";
-import type { AdversarialVerdict, DispatchFailureCause, DispatchResult } from "./types.ts";
-import { ADVERSARIAL_TRANSIENT_MAX_RETRIES, isRateLimit429Msg } from "./types.ts";
+import type { AdversarialVerdict, DispatchResult } from "./types.ts";
 import type { ExecFn } from "./worktree.ts";
 export const MAX_ROUNDS = 3;
 
@@ -50,50 +61,7 @@ export function adversarialPhaseBudgetMs(): number {
  * state for dispatch_peek / dispatch_steer to resolve into the running child.
  */
 export async function runAdversarialLoop(
-  params: {
-    /** Optional when `base` + `head` are present (computed from the ref
-     * range). When both `diff` and base/head are given, the string wins. */
-    diff?: string;
-    /** #1040 — git timeout for the comment-loss check (the driver passes verifyTimeoutMs()). */
-    commentTimeoutMs?: number;
-    /** #1040 — injected git seam for the comment-loss check (the driver passes its verify exec). */
-    commentExecFn?: ExecFn;
-    /** #859 — the base ref the tool computes the diff from (with head). */
-    base?: string;
-    /** #859 — the head ref the tool computes the diff from (with base). */
-    head?: string;
-    context: string;
-    workCwd?: string;
-    /** Recompute the diff before each review. Without it rounds 2+ see pre-fix material. */
-    getDiff?: () => Promise<string>;
-    /** What the fix pass before this review changed (fix-delta.ts); first round only. */
-    fixDelta?: string;
-    /** The issue this diff is meant to satisfy (#278). Optional: older state files have none. */
-    issueBody?: string;
-    /** The gate the driver already ran green on this tree; the reviewer is told not to re-run it. */
-    gateCmd?: string;
-    /** #799 — the slow-run recorder for this loop's inner children (each
-     * threshold crossing of a review / fix round appends dispatch-slow), and
-     * the parent pi for their slow-run watch (the PM notice half). */
-    onSlow?: OnSlowCallback;
-    pi?: ExtensionAPI;
-    /** #912 — caller-supplied branch for the review-ledger write (the driver
-     * worktrees are detached, so `git rev-parse --abbrev-ref HEAD` cannot
-     * recover it). When absent the writer recovers the branch from `HEAD`
-     * and skips (traces) on a detached head. */
-    branch?: string;
-    /**
-     * #1114 — exactly ONE reviewer dispatch: no developer dispatch, no fix
-     * round. The result carries the parsed verdict in `adversarialRounds` and
-     * its findings in `text`; the driver routes from the round record. The
-     * review-ledger entry is still written (#912) with `loopOutcome` set to
-     * `approved` on a pass and `rejected` otherwise. An unparsed verdict is an
-     * infrastructure outcome, never a verdict.
-     */
-    reportOnly?: boolean;
-    /** #1114 — the round number a reportOnly review carries (prompt + record). Default 1. */
-    reportRound?: number;
-  },
+  params: AdversarialLoopParams,
   signal: AbortSignal,
   orchestratorJobId: string,
   /** #859 — the ref-range diff computation (injectable for tests). Used when
@@ -131,7 +99,12 @@ export async function runAdversarialLoop(
     workCwd: params.workCwd,
   });
 
-  const ledgerWrite = (result: DispatchResult): DispatchResult => {
+  const fenceRecords: FenceRecord[] = [];
+  const fence = createFixFence(params.fixFence, fenceRecords);
+  const ledgerWrite = (raw: DispatchResult): DispatchResult => {
+    // #1104 — fence findings are prefixed BEFORE the write: the durable ledger
+    // row must carry the same text the caller sees.
+    const result = withFixViolations(raw, fenceRecords);
     writeAdversarialLedgerEntry(result, {
       workCwd: params.workCwd,
       // #988 — thread the branch the note resolved (same shared resolution,
@@ -241,76 +214,13 @@ export async function runAdversarialLoop(
     if (r.model && !lastModel) lastModel = r.model;
   };
 
-  /**
-   * Run one phase, threading dispatch-deck lifecycle and onProgress so the deck
-   * shows whichever phase is running now. Also registers the inner spawn as the
-   * orchestrator's `activeChild` so PM can `dispatch_peek` / `dispatch_steer`
-   * against the loop's jobId and reach the currently-running inner child.
-   */
-  const runPhase = async (
-    role: "adversarial-developer" | "developer",
-    tag: string,
-    prompt: string,
-    cwd?: string,
-  ): Promise<DispatchResult> => {
-    const deckKey = `${runId}/${tag}`;
-    const label = `${role}[${tag}]`;
-    dispatchDeck.startEntry(deckKey, { label, role, tag });
-    // #799 — the slow-run watch for this inner child: the deck key is the id
-    // dispatch_peek shows, and it is what the PM notice names. The parent pi
-    // is threaded so the notice reaches the PM (the watch site has no pi).
-    // #907 — the CI-wait span feed for this inner child: the watch chains
-    // its span tracker in front of the raw-event hook the spawn receives.
-    const slowRaw: (event: PiJsonEvent) => void = () => {};
-    const stopSlow = watchSlowDispatch({
-      id: deckKey,
-      role,
-      label,
-      ...(params.onSlow ? { onSlow: params.onSlow } : {}),
-      ...(params.pi ? { pi: params.pi } : {}),
-      onRawEvent: slowRaw,
-    });
-    // This child's own abort, so dispatch_kill <deckKey> can stop a hung
-    // round — the driver passes a loop signal that nothing ever aborts.
-    const kill = new AbortController();
-    const onLoopAbort = () => kill.abort();
-    if (signal.aborted) kill.abort();
-    else signal.addEventListener("abort", onLoopAbort, { once: true });
-    try {
-      return await spawnSpecialist(
-        { role, prompt, cwd },
-        {
-          signal: kill.signal,
-          runId,
-          tag,
-          onProgress: (state) => {
-            dispatchDeck.updateEntry(deckKey, state);
-            feedSlowProgress(deckKey, state);
-          },
-          onRawEvent: stopSlow.onRawEvent ?? slowRaw,
-          onStdin: (stdin) => {
-            // Publish this inner spawn as the orchestrator's active child so
-            // PM's peek/steer calls against the orchestrator jobId resolve
-            // to this stdin. Updated on each round; cleared in the finally.
-            setOrchestratorActiveChild(orchestratorJobId, {
-              role,
-              label,
-              deckKey,
-              stdin,
-            });
-            // #799 — also registered under the deck key (steer from the peek id).
-            registerChildHandle(deckKey, stdin, label, role, () => kill.abort());
-          },
-        },
-      );
-    } finally {
-      signal.removeEventListener("abort", onLoopAbort);
-      stopSlow.stop();
-      dispatchDeck.clearEntry(deckKey);
-      childHandles.delete(deckKey);
-      setOrchestratorActiveChild(orchestratorJobId, null);
-    }
-  };
+  const runPhase = makeRunPhase({
+    runId,
+    signal,
+    orchestratorJobId,
+    ...(params.onSlow ? { onSlow: params.onSlow } : {}),
+    ...(params.pi ? { pi: params.pi } : {}),
+  });
 
   // Re-read before every review. `fetchDiff` used to run once, before the loop,
   // so rounds 2 and 3 were prompted with pre-fix material and the reviewer had to
@@ -356,6 +266,8 @@ export async function runAdversarialLoop(
         fixDelta: round === firstRound ? params.fixDelta : undefined,
         // #1040 — comments this round's diff removed, for the reviewer to judge.
         commentEvidence: renderCommentEvidence(lastComments),
+        // #1137 — scope the review to this workstream (N>1 only; absent on N=1).
+        ...(params.scope !== undefined ? { scope: params.scope } : {}),
       }),
       params.workCwd,
       { runPhase, accumulate, signal },
@@ -382,7 +294,8 @@ export async function runAdversarialLoop(
       // #912 — the review ledger keys on the latest entry per branch, so every
       // reviewed round records its verdict: a pass is `approved`, anything the
       // driver will route back or reject is `rejected` (replaced by a later pass).
-      const passed = decideLoopAction(verdict.status, round, MAX_ROUNDS, true) === "pass";
+      const terminalRound = params.reportVerdict === "terminal" ? MAX_ROUNDS : round;
+      const passed = decideLoopAction(verdict.status, terminalRound, MAX_ROUNDS, true) === "pass";
       return ledgerWrite(
         synthesizeResult({
           ok: true,
@@ -439,21 +352,42 @@ export async function runAdversarialLoop(
       return ledgerWrite(r);
     }
     if (action === "reject") break;
-
-    const fix = await runPhaseWithInfraRetry(
-      "developer",
-      `round${round}-fix`,
-      buildFixPrompt({
-        findings: verdict.findings,
-        context: params.context,
-        diff,
-        round,
-        issueBody: params.issueBody,
-        priorFindings: [...priorFindings],
-      }),
-      params.workCwd,
-      { runPhase, accumulate, signal },
-    );
+    if (!params.workCwd) {
+      const state = { start, usage, lastTranscript, lastModel, rounds };
+      return ledgerWrite(workCwdRequiredResult(round, verdict, state));
+    }
+    // #1104 — the fence checks workCwd (a worktree of the caller's repo) before
+    // the first fix round, and runs the caller-repo check after every round,
+    // even one whose dispatch throws. A refused round dispatches nothing.
+    let fixRun: FencedRound<DispatchResult>;
+    try {
+      fixRun = await fence.round(round, params.workCwd, () =>
+        runPhaseWithInfraRetry(
+          "developer",
+          `round${round}-fix`,
+          buildFixPrompt({
+            findings: verdict.findings,
+            context: params.context,
+            diff,
+            round,
+            issueBody: params.issueBody,
+            priorFindings: [...priorFindings],
+          }),
+          params.workCwd,
+          { runPhase, accumulate, signal },
+        ),
+      );
+    } catch (err) {
+      // A throwing dispatch must not lose the fence's records: the ledger write
+      // carries them (the check ran in the fence's finally before this throw).
+      const state = { start, usage, lastTranscript, lastModel, rounds };
+      return ledgerWrite(fixThrewResult(round, err, state));
+    }
+    if (!fixRun.ran) {
+      const state = { start, usage, lastTranscript, lastModel, rounds };
+      return ledgerWrite(fixRefusedResult(fixRun.outcome, fixRun.reason, state));
+    }
+    const fix = fixRun.value;
     // Record what this round asked for, so the next fixer does not undo it.
     priorFindings.push(
       `Round ${round} (${verdict.status}): ${summariseFindings(verdict.findings)}`,

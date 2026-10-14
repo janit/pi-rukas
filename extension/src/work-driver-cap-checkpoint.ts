@@ -41,8 +41,8 @@ import {
   type WorkEvent,
   type WorkState,
   type WorkStep,
+  persistCycle,
   readState,
-  writeState,
 } from "./workflow-state.ts";
 
 const checkpointExecp = promisify(exec);
@@ -383,7 +383,7 @@ export async function checkpointCapedDispatch(
     );
     merged = { ...state, pipelineState: { ...state.pipelineState, capedPartialState: cps } };
   }
-  await writeState(ctx.repoRoot, merged);
+  await persistCycle(ctx, merged);
   trace(
     `work-driver: checkpoint for ${step}/${role} (cap=${cap}) — tree=${tree} sha=${commitSha ?? "(none)"} statusFile=${statusFile}`,
   );

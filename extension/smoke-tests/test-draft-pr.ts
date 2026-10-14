@@ -122,7 +122,7 @@ async function cycle(name: string, headless: boolean) {
     }
     return { stdout: "" };
   };
-  const ctx = { pi: {}, repoRoot: repo, issue: ISSUE, verifyExecFn: exec, headless };
+  const ctx = { host: {}, repoRoot: repo, issue: ISSUE, verifyExecFn: exec, headless };
   const base = initialState(ISSUE, 1000);
   const initial: WorkState = {
     ...base,
@@ -268,7 +268,7 @@ async function handoff(state: WorkState, failures = 0) {
   try {
     const { forge, ready } = mkForge(failures);
     const ctx: DriverContext = {
-      pi: fakePi,
+      host: fakePi,
       repoRoot: dir,
       issue: ISSUE,
       dispatchFn: failingDispatch,
@@ -380,7 +380,7 @@ async function handoff(state: WorkState, failures = 0) {
 // ---------------------------------------------------------- ci entry + merge
 {
   const { forge, ready } = mkForge(0);
-  const ctx = { pi: fakePi, repoRoot: "/nonexistent", issue: ISSUE, forge } as DriverContext;
+  const ctx = { host: fakePi, repoRoot: "/nonexistent", issue: ISSUE, forge } as DriverContext;
   const marked = await markDraftPrReady(ctx, reviewState([], { status: "draft" }));
   assert(
     ready.length === 1 && marked.pipelineState.prDraft?.status === "ready",
@@ -406,7 +406,7 @@ async function handoff(state: WorkState, failures = 0) {
     return { stdout: "" };
   };
   const ctx = {
-    pi: fakePi,
+    host: fakePi,
     repoRoot: "/nonexistent",
     issue: ISSUE,
     forge: recordingForge,

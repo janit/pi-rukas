@@ -19,13 +19,16 @@
  * the filed body, which keeps their links so a later `/work` on the filed issue
  * can fetch them again.
  */
+import type { PlanDispatchFn } from "./plan-driver-seams.ts";
 import { trace } from "./trace.ts";
 import {
   type IssueImage,
   imageDirs,
   issueImagesEnabled,
+  issueImagesSection,
   loadIssueImages,
   manifestIssue,
+  withIssueImages,
 } from "./work-driver-issue-images.ts";
 
 /** The images a planning session is given. Empty when there is nothing to give; never throws. */
@@ -72,4 +75,13 @@ export function planImageLinksSection(images: IssueImage[]): string {
     "",
     ...linked.map((i) => `- ![${i.file}](${i.link})`),
   ].join("\n");
+}
+
+/** The plan children's dispatch carrying the source issue's images, and those images. */
+export async function withPlanImages(
+  dispatch: PlanDispatchFn,
+): Promise<{ dispatch: PlanDispatchFn; images: IssueImage[] }> {
+  const images = await loadPlanImages();
+  const section = issueImagesSection(images, "planChild");
+  return { dispatch: withIssueImages(dispatch, images, section), images };
 }

@@ -81,7 +81,7 @@ export function recoveryStepsForCap(
           // "pushed to origin: yes" contradicted itself.
           comment: [
             ps.handoffSnapshot?.branchPushed
-              ? `2. Push the branch (origin already has an EARLIER push of it; what the driver consolidated at handoff time is local only — if the push is rejected as non-fast-forward, compare \`git log origin/${ps.branchName}..${ps.branchName}\` before forcing anything):`
+              ? `2. Push the branch (origin already has an EARLIER push of it; what the driver consolidated at handoff time is local only — if the push is rejected as non-fast-forward, compare \`git log ${ps.branchName} ^origin/${ps.branchName}\` before forcing anything):`
               : "2. Push the branch (the push works by branch name — the local branch was created at handoff time; it is not yet pushed):",
           ],
           lines: [`git push -u origin ${ps.branchName}`],

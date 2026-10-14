@@ -22,8 +22,8 @@
  * verbatim (plan-confirm.ts — no phase below runs).
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { dispatchCore } from "./dispatch.ts";
+import { type PlanBase, withPlanBase } from "./plan-base-tree.ts";
 import { confirmVerbatim, heldForReview, settlePlanCache } from "./plan-confirm.ts";
 import { codeIdentifiersIn, draftSpec, mechanicalInventory } from "./plan-draft.ts";
 import {
@@ -31,6 +31,7 @@ import {
   buildPlanResult,
   correctiveRedraftError,
   haltResult,
+  phaseTimer,
 } from "./plan-driver-halt.ts";
 import {
   type PlanDispatchFn,
@@ -38,14 +39,10 @@ import {
   getPlanStatFnOverride,
 } from "./plan-driver-seams.ts";
 import { reviewedDigestOf } from "./plan-filing-claim.ts";
-import {
-  type GapGateLoopResult,
-  residualGapsSection,
-  runGapGateLoop,
-  settledGapsSection,
-} from "./plan-gaps.ts";
+import { filedBodyOf, settledGapsSection } from "./plan-gap-disclosure.ts";
+import { type GapGateLoopResult, runGapGateLoop } from "./plan-gaps.ts";
 import { type CarriedCritical, gapGatePrompt, gapGateVerifyPrompt } from "./plan-gate-prompt.ts";
-import { loadPlanImages, planImageLinksSection } from "./plan-images.ts";
+import { planImageLinksSection, withPlanImages } from "./plan-images.ts";
 import {
   type InvestigationResult,
   PLAN_DISPATCH_TIMEOUT_MS,
@@ -64,7 +61,6 @@ import { assemblePriorContext } from "./plan-prior-context-assembly.ts";
 import {
   type PlanDriverInput,
   type PlanGap,
-  type PlanPhaseTiming,
   type PlanResult,
   classifyPlanType,
   planTitle,
@@ -77,7 +73,7 @@ import {
 } from "./plan-validate.ts";
 import { type ResolvedDecision, buildResolvedDecisions } from "./plan-writeback.ts";
 import { trace } from "./trace.ts";
-import { issueImagesSection, withIssueImages } from "./work-driver-issue-images.ts";
+import type { DriverHost } from "./work-driver-host.ts";
 
 const GAP_GATE_MAX_ITERATIONS = 2;
 
@@ -90,44 +86,39 @@ export { gapGatePrompt } from "./plan-gate-prompt.ts";
 // ---------------------------------------------------------------------------
 
 export async function runPlanPipeline(
-  pi: ExtensionAPI,
+  pi: DriverHost,
   input: PlanDriverInput,
   repoRoot: string,
 ): Promise<PlanResult> {
+  // #1132: one origin fetch per run; the base tree is removed when the run ends.
+  return withPlanBase(repoRoot, async (base) => {
+    const result = await runPipelineOn(pi, input, repoRoot, base);
+    return base.baseFallback ? { ...result, baseFallback: base.baseFallback } : result;
+  });
+}
+
+async function runPipelineOn(
+  pi: DriverHost,
+  input: PlanDriverInput,
+  repoRoot: string,
+  base: PlanBase,
+): Promise<PlanResult> {
   // The source issue's images (plan-images.ts): with every child, links in the body.
-  const images = await loadPlanImages();
-  const imagesSection = issueImagesSection(images, "planChild");
-  const dispatch: PlanDispatchFn = withIssueImages(
-    getPlanDispatchOverride() ?? dispatchCore,
-    images,
-    imagesSection,
-  );
+  const { dispatch, images } = await withPlanImages(getPlanDispatchOverride() ?? dispatchCore);
   const { descriptor, context, dryRun } = input;
   const type = classifyPlanType(descriptor, input.type);
   const depth = input.depth ?? 0;
 
   // Per-phase wall-clock record (research next-step #1: measure, then cut).
-  const timings: PlanPhaseTiming[] = [];
-  const pipelineStart = Date.now();
-  const timed = async <T>(phase: string, fn: () => Promise<T>): Promise<T> => {
-    const t0 = Date.now();
-    try {
-      return await fn();
-    } finally {
-      timings.push({ phase, ms: Date.now() - t0 });
-    }
-  };
-  const finishTimings = (): PlanPhaseTiming[] => {
-    const total = { phase: "total", ms: Date.now() - pipelineStart } as const;
-    return [...timings, total];
-  };
+  const { timed, finishTimings } = phaseTimer();
 
   // #1043 — the cache lineage at git HEAD. A dry run never READS the investigation
   // cache (it is the thing confirmed); it DROPS the lineage first, so a halting dry
   // run leaves no fileable verdict. Its settled gaps are read before the drop.
-  const gitState = await resolvePlanGitState(repoRoot);
+  // #1132: "HEAD" here is origin/<default> (the run's base SHA), not the local HEAD.
+  const gitState = await resolvePlanGitState(repoRoot, base);
   const cacheInputs = gitState
-    ? { descriptor, context, type, head: gitState.head, depth }
+    ? { descriptor, context, type, keySha: gitState.keySha, depth }
     : undefined;
   const settled: PlanGap[] =
     gitState && cacheInputs ? await readSettledGaps(gitState.cacheDir, cacheInputs) : [];
@@ -169,9 +160,12 @@ export async function runPlanPipeline(
       ? await readInvestigationCache(gitState.cacheDir, cacheInputs)
       : undefined;
 
+  // #1132: investigators and the inventory read origin/<default> (one fetch per run),
+  // never the working tree; the cache key above uses the same SHA.
+  const readRoot = base.readRoot;
   const inv = reused
     ? reused.cached.inventory
-    : await timed("inventory", () => mechanicalInventory(repoRoot, descriptor));
+    : await timed("inventory", () => mechanicalInventory(readRoot, descriptor));
   // Phase 1's two-channel prior-context build (plan-prior-context-assembly.ts):
   // the child-prompt channel gets the FULL operator context (D2: the operator
   // is the authority — test-plan-prior-context.ts pins those caps), the
@@ -195,7 +189,7 @@ export async function runPlanPipeline(
         runInvestigation(dispatch, pi, {
           type,
           descriptor,
-          repoRoot,
+          repoRoot: readRoot,
           inv,
           priorContext,
           codeIdentifiers: codeIds,
@@ -331,6 +325,7 @@ export async function runPlanPipeline(
   let capHit = false;
   let capReason: PlanResult["capReason"];
   let residualForDisclosure: PlanGap[] = [];
+  let openPoints: PlanGap[] = [];
   let rawUnparsedHead: string | undefined;
 
   // The carried CRITICAL decisions from the last corrective re-draft — what
@@ -413,16 +408,17 @@ export async function runPlanPipeline(
     capHit = loopResult.capHit;
     capReason = loopResult.capReason;
     residualForDisclosure = loopResult.residualForDisclosure;
+    openPoints = loopResult.openPoints;
     rawUnparsedHead = loopResult.rawUnparsedHead;
   }
 
   // D2: when the cap routed to filing, the spec that gets filed carries the
   // residual disclosure. Append it HERE, before fileIssue, so the single
   // filing pass below sees the final body.
+  // #1132: open points and the base fallback are disclosed in the body too.
   const finalBody =
-    (residualForDisclosure.length > 0
-      ? `${body}\n\n${residualGapsSection(residualForDisclosure)}`
-      : body) + planImageLinksSection(images);
+    filedBodyOf(body, residualForDisclosure, openPoints, base.baseFallback) +
+    planImageLinksSection(images);
 
   const resolvedGaps = gapGateEnabled ? gaps : [];
   const held = heldForReview(input, confirmed.missReason, title, finalBody);

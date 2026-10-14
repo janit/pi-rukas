@@ -94,7 +94,7 @@ export async function runSingleDispatch(
   // the state file at the PREVIOUS step boundary still claiming `running`. A
   // crashed cycle was indistinguishable from a live one, forever. Persisting
   // the intent first is what makes the difference visible on resume.
-  const begun = await beginDispatch(ctx.repoRoot, next, step, role, label, startedAt);
+  const begun = await beginDispatch(ctx, next, step, role, label, startedAt);
   next = begun.state;
   const jobId = begun.jobId;
   let result: DispatchResult;
@@ -108,7 +108,7 @@ export async function runSingleDispatch(
     // the `onSlow` callback; there is no driver-side polling loop here.
     // The await itself is unchanged: same promise, same resolution.
     result = await dispatch(
-      ctx.pi,
+      ctx.host,
       // `cwd` matters when work lives elsewhere (lens-fix: worktree, not repoRoot).
       { role, prompt: buildPrompt(), ...(opts?.cwd ? { cwd: opts.cwd } : {}) },
       {

@@ -36,6 +36,7 @@ export interface ExecTreeOpts {
   /** Per-stream cap in characters; `exec`'s default. */
   maxBuffer?: number;
   shell?: string;
+  env?: NodeJS.ProcessEnv;
   /**
    * argv form: `cmd` is the executable and `argv` its arguments, run with no
    * shell. The driver's `ExecFn` type declares it, so an executor standing
@@ -78,6 +79,7 @@ export function execTree(
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, argv ?? [], {
       cwd: opts.cwd,
+      env: opts.env,
       shell: argv ? false : (opts.shell ?? true),
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],

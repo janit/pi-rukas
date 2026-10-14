@@ -241,7 +241,7 @@ export function makeRunOneWorkstream(
       const issueBodyArtifactPaths = artifactPaths;
       const [developerSettled, speculativeSettled] = await Promise.allSettled([
         dispatch(
-          ctx.pi,
+          ctx.host,
           {
             role: "developer",
             prompt: inlineDevelopPrompt(
@@ -272,7 +272,7 @@ export function makeRunOneWorkstream(
         ),
         speculativeOn
           ? dispatch(
-              ctx.pi,
+              ctx.host,
               {
                 role: "explore",
                 prompt: inlineSpeculativeExplorePrompt(

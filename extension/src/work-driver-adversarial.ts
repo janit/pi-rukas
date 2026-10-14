@@ -33,6 +33,7 @@ import {
 } from "./work-driver-lens-fix-commit.ts";
 import { commitLensFixChanges, lensWorktree } from "./work-driver-lens.ts";
 import { withIntegrationLock } from "./work-driver-lock.ts";
+import { runNetGit } from "./work-driver-net-git.ts";
 import { endIfPrGone } from "./work-driver-pr-gone.ts";
 import { scratchDir } from "./work-driver-workspace.ts";
 import type { PipelineState } from "./workflow-state-schema.ts";
@@ -246,8 +247,11 @@ export async function runAdversarial(
       }
       if (result.committed && !result.pushed) {
         try {
-          await execFn("git push origin HEAD -q", { cwd: ctx.repoRoot, maxBuffer: 64 * 1024 });
+          await runNetGit(execFn, "git push origin HEAD -q", { cwd: ctx.repoRoot });
         } catch (err) {
+          // #1095: a timeout is non-blocking too, and its message names the
+          // cause ("network git timed out"). The fix is then not on the PR, and
+          // the plumbReport below is where the operator sees it.
           const errMsg = `lens-fix push failed (non-blocking): ${(err as Error).message?.slice(0, 200)}`;
           trace(`work-driver: ${errMsg}`);
           next.pipelineState.plumbReports.push({

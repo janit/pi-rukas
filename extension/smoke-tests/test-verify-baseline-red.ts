@@ -84,7 +84,7 @@ async function run(name: string, outcomeFor: (where: "base" | "change") => Outco
   await runVerifyCommandGate({
     execFn,
     cmd: CMD,
-    ctx: { pi: {} as unknown as DriverContext["pi"], repoRoot: repo, issue: 9 } as DriverContext,
+    ctx: { host: {} as unknown as DriverContext["host"], repoRoot: repo, issue: 9 } as DriverContext,
     state,
     worktrees: { default: wt },
     baseSha,

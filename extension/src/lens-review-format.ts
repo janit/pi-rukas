@@ -10,8 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import { neutraliseEvidence } from "./comment-evidence.ts";
 import { type SuppressedFinding, suppressedSection } from "./lens-residuals.ts";
+import { advisorySection } from "./lens-review-advisory.ts";
+import { deltaFallbackText } from "./lens-review-diff.ts";
 import { isReviewIncomplete } from "./lens-review-incomplete.ts";
 import type { Finding, FindingSource, LensRunResult } from "./lens-review.ts";
+import { CLAIM_SCAN, CLAIM_SCAN_PRECEDENCE, type RosterEntry } from "./lens-roster.ts";
 import type { DispatchResult, DispatchUsage } from "./types.ts";
 
 /** The finding's severity level. Owned here (the pure leaf both the format
@@ -69,7 +72,7 @@ export interface LensReviewSummary {
    * as distinct from an operator-supplied `since`. The findings it produced are
    * findings on the DELTA; a later full review still owns the rest of the branch.
    */
-  deltaReview?: { since: string; head: string; auto?: boolean };
+  deltaReview?: { since: string; head: string; auto?: boolean; fallback?: string };
   /**
    * #973 — the no-review outcome (decision 4): the delta was empty (nothing
    * changed since the last recorded lens run), so no review ran at all. The
@@ -93,6 +96,8 @@ export interface LensReviewSummary {
    * the residual comment.
    */
   memoryNote?: string;
+  /** #1140 — carried rows on files outside the PR's diff: listed, never blocking. */
+  advisory?: Finding[];
 }
 
 /**
@@ -106,9 +111,19 @@ export interface LensReviewSummary {
  * or was aborted without evidence: the review is incomplete and the user/PM
  * must decide whether to retry the whole pass, override, or halt — never
  * silently downgrade a six-pass review to a five-pass one (#3).
+ *
+ * #1127 — `ROUND_CAP_REACHED` and `REVIEW_INCOMPLETE_STREAK` are produced only
+ * by the tool-side round budget (lens-round-cap.ts): no lens ran, nothing was
+ * recorded. The streak refusal is distinct so an operator can tell a stalled
+ * infrastructure outage from a spent round budget.
  */
-export type Verdict = "APPROVED" | "ISSUES_FOUND" | "CRITICAL_ISSUES_FOUND" | "REVIEW_INCOMPLETE";
-import { CLAIM_SCAN, CLAIM_SCAN_PRECEDENCE, type RosterEntry } from "./lens-roster.ts";
+export type Verdict =
+  | "APPROVED"
+  | "ISSUES_FOUND"
+  | "CRITICAL_ISSUES_FOUND"
+  | "REVIEW_INCOMPLETE"
+  | "ROUND_CAP_REACHED"
+  | "REVIEW_INCOMPLETE_STREAK";
 
 export const LENS_PREFIX = "code-review-";
 
@@ -209,67 +224,7 @@ function normalisePath(p: string): string {
   return p.replace(/^\.\//, "").replace(/\/+$/, "");
 }
 
-/**
- * Deduplicate findings by (normalised path, line, lowercased title). When
- * duplicates exist across lenses, keep the one from the highest-priority lens
- * (roster precedence ascending: the lowest declared value wins). `lens`
- * takes the roster parsed from the skills dir; lenses the roster does not
- * know (e.g. stale findings from an older pass) fall back to 99.
- */
-export function dedupeFindings(input: Finding[], lens: RosterEntry[]): Finding[] {
-  const precedenceOf = new Map<FindingSource, number>();
-  for (const l of lens) {
-    if (l.precedence !== undefined) precedenceOf.set(l.name, l.precedence);
-  }
-  // CLAIM_SCAN outranks every lens on a collision. Its findings are lookups,
-  // not judgments — if a lens and the scan land on the same line, the one that
-  // can point at a grep result is the one worth keeping. NEGATIVE_INFINITY so
-  // it outranks any declared value, whatever the skill authors renumber to.
-  precedenceOf.set(CLAIM_SCAN, CLAIM_SCAN_PRECEDENCE);
-  // `bestByKey` is bounded by the lens fan-in (≤6 children × finite findings
-  // per pass) — at most a few hundred entries per invocation, and the whole
-  // map goes out of scope when this function returns. No explicit cap needed.
-  const bestByKey = new Map<string, Finding>();
-  for (const f of input) {
-    const key = `${f.path}::${f.line ?? 0}::${normaliseTitle(f.title)}`;
-    const existing = bestByKey.get(key);
-    if (!existing) {
-      bestByKey.set(key, f);
-      continue;
-    }
-    const a = precedenceOf.get(existing.lens) ?? 99;
-    const b = precedenceOf.get(f.lens) ?? 99;
-    if (b < a) bestByKey.set(key, f);
-  }
-  return Array.from(bestByKey.values()).sort(sortFindings);
-}
-
-function normaliseTitle(t: string): string {
-  return t
-    .toLowerCase()
-    .replace(/[.!?;,]+$/, "")
-    .trim();
-}
-
-const SEVERITY_ORDER: Record<Severity, number> = {
-  CRITICAL: 0,
-  HIGH: 1,
-  MEDIUM: 2,
-  LOW: 3,
-};
-
-function sortFindings(a: Finding, b: Finding): number {
-  const s = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
-  if (s !== 0) return s;
-  if (a.path !== b.path) return a.path.localeCompare(b.path);
-  return (a.line ?? 0) - (b.line ?? 0);
-}
-
-export function bySeverityCounts(findings: Finding[]): Record<Severity, number> {
-  const out: Record<Severity, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-  for (const f of findings) out[f.severity]++;
-  return out;
-}
+export { bySeverityCounts, dedupeFindings } from "./lens-findings-dedupe.ts";
 
 // The evidence rule (lensProducedEvidence, NO_TEXT_PLACEHOLDER) and the
 // incompleteness rule live in lens-review-incomplete.ts; re-exported here so
@@ -363,6 +318,10 @@ function killCauseSuffix(r: LensRunResult): string {
 }
 
 export function renderSummary(s: LensReviewSummary, maxLensAttempts: number): string {
+  // #1127 — a round-budget refusal ran no lens; its note is the whole report.
+  if (s.verdict === "ROUND_CAP_REACHED" || s.verdict === "REVIEW_INCOMPLETE_STREAK") {
+    return s.note ?? s.verdict;
+  }
   // #973 — the no-review outcome (decision 4): the delta was empty, so no
   // review ran. This is NOT an approval — the summary must say "NO REVIEW",
   // never "APPROVED" (a no-review outcome looking like an approval is the
@@ -454,6 +413,11 @@ export function renderSummary(s: LensReviewSummary, maxLensAttempts: number): st
     ...(s.deltaReview
       ? [
           `Mode: delta review since ${s.deltaReview.since.slice(0, 8)}${s.deltaReview.auto ? " (automatic — the last recorded lens run)" : ""} — findings below cover only \`git diff ${s.deltaReview.since}..${s.deltaReview.head}\` since the last recorded lens run, not the full branch diff.`,
+          ...(s.deltaReview.fallback
+            ? [
+                `Delta fallback: ${deltaFallbackText({ since: s.deltaReview.since, fallback: s.deltaReview.fallback })}.`,
+              ]
+            : []),
         ]
       : ["Mode: full review (the whole branch diff)"]),
     `Total findings: ${s.totalFindings}  (${sevSummary || "none"})`,
@@ -469,6 +433,7 @@ export function renderSummary(s: LensReviewSummary, maxLensAttempts: number): st
       s.suppressed,
       `Suppressed as already known (${s.suppressed?.length ?? 0}, not re-reported):`,
     ),
+    ...advisorySection(s.advisory),
     ...(s.memoryNote ? ["", neutraliseEvidence(s.memoryNote)] : []),
     "",
     "Transcripts:",

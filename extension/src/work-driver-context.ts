@@ -12,10 +12,12 @@
  * table itself.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { DispatchHost } from "./async-jobs-lifecycle.ts";
 import type { LensReviewSummary } from "./lens-review.ts";
 import type { OnSlowCallback } from "./slow-notice.ts";
 import type { DispatchImage, DispatchResult } from "./types.ts";
+import type { DriverHost } from "./work-driver-host.ts";
+import type { EmitSink } from "./work-state-emit.ts";
 import { KNOWN_STATUSES } from "./workflow-state-validate.ts";
 import { WORK_STEPS, type WorkState, type WorkStep } from "./workflow-state.ts";
 
@@ -146,9 +148,16 @@ export const STEP_FAILURE_POLICY: Record<WorkStep, StepFailurePolicy> = {
 };
 
 export interface DriverContext {
-  pi: ExtensionAPI;
+  /** The host the cycle runs in (#1020). Pi-session or a recording test host. */
+  host: DriverHost;
   /** Project root (NOT a worktree). State file lives here. */
   repoRoot: string;
+  /**
+   * S4a (#1162) — this cycle's emit sink, passed to every `writeState`. Created
+   * by `enterCycle` (work-driver-cycle-entry.ts); absent for a direct step call,
+   * in which case persists write without emitting.
+   */
+  emitSink?: EmitSink;
   /** Primary issue number — anchors state file path + branch name. For
    * multi-issue cycles this is `issues[0]`. */
   issue: number;
@@ -160,7 +169,7 @@ export interface DriverContext {
    * Production callers omit this — the default is the real dispatchCore.
    */
   dispatchFn?: (
-    pi: ExtensionAPI,
+    host: DispatchHost,
     spec: { role: string; prompt: string; cwd?: string; images?: DispatchImage[] },
     opts?: {
       label?: string;

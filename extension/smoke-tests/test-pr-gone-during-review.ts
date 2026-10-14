@@ -61,6 +61,8 @@ async function cycle(name: string) {
   const { repo, baseSha } = await fixture(root, name);
   await addLocalRemote(root, repo);
   await git(repo, ["push", "-q", "-u", "origin", "main"]);
+  // The lens diff resolves the mainline from origin/HEAD.
+  await git(repo, ["remote", "set-head", "origin", "main"]);
   await git(repo, ["checkout", "-q", "-b", BRANCH]);
   writeFileSync(path.join(repo, "a.txt"), "feature\n");
   await git(repo, ["add", "."]);
@@ -110,7 +112,7 @@ async function cycle(name: string) {
     return { stdout: "" };
   };
   const ctx = {
-    pi: { sendUserMessage: () => {} },
+    host: { sendUserMessage: () => {} },
     repoRoot: repo,
     issue: ISSUE,
     verifyExecFn: exec,

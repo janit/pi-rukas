@@ -75,7 +75,7 @@ function stateAfter(step: WorkStep, from: WorkStep, ...tail: WorkEvent[]): WorkS
 async function routed(step: WorkStep, state: WorkState): Promise<WorkState> {
   const repoRoot = path.join(root, `route-${Math.random().toString(36).slice(2)}`);
   mkdirSync(repoRoot, { recursive: true });
-  const ctx = { pi: {}, repoRoot, issue: ISSUE } as unknown as DriverContext;
+  const ctx = { host: {}, repoRoot, issue: ISSUE } as unknown as DriverContext;
   const out = await routeStepOutcome(ctx, state, step, { num: 5, total: 9 }, 1, Date.now());
   return out.state;
 }

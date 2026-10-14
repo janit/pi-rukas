@@ -111,7 +111,7 @@ export async function dispatchExploreAttempt(
   const exploreTranscript = transcriptPathFor("explore", exploreRunId);
   // #382 — write-ahead before the await; see work-driver-resume.ts.
   const begun = await beginDispatch(
-    ctx.repoRoot,
+    ctx,
     state,
     "explore",
     "explore",
@@ -123,7 +123,7 @@ export async function dispatchExploreAttempt(
   let exploreDispatch: DispatchResult;
   try {
     exploreDispatch = await dispatch(
-      ctx.pi,
+      ctx.host,
       { role: "explore", prompt },
       // #799 — the slow recorder collects into the driver's pending buffer;
       // the step boundary (routeStepOutcome) drains it — this step folds

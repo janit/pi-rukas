@@ -104,6 +104,8 @@ export const KNOWN_EVENT_KINDS = [
   // A residual-findings disclosure that did not reach the PR (and whether the
   // issue got it instead).
   "lens-residuals-post-failed",
+  // S4a (#1162) — the interrupt record (SIGTERM / SIGINT via markInterrupted).
+  "interrupted",
 ] as const;
 
 // #986 — compile-time exhaustiveness. If the `WorkEvent` union gains a kind
@@ -119,7 +121,14 @@ const _eventKindExhaustive: [MissingEventKinds] extends [never] ? true : Missing
 void _eventKindExhaustive;
 
 /** `pipelineState.status` vocabulary. */
-export const KNOWN_STATUSES: readonly unknown[] = ["running", "merged", "handoff", "aborted"];
+export const KNOWN_STATUSES: readonly unknown[] = [
+  "running",
+  "merged",
+  "handoff",
+  "aborted",
+  // S4a (#1162) — resumable; re-entry treats it as running.
+  "interrupted",
+];
 
 /**
  * #540 — `pipelineState.incompleteConsolidation.verdicts[].status`

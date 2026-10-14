@@ -97,7 +97,7 @@ try {
   };
 
   const ctxFor = (dir: string, exec: NonNullable<DriverContext["verifyExecFn"]>): DriverContext => ({
-    pi: makeFakePi().pi,
+    host: makeFakePi().pi,
     repoRoot: dir,
     issue: 1012,
     verifyExecFn: exec,

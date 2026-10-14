@@ -51,8 +51,6 @@ const SRC = path.join(import.meta.dir, "..", "src");
 const SHELL_ONLY_SEAMS: Record<string, string> = {
   "forge-detect.ts": "its own seam is `typeof execp`: shell strings only",
   "forge.ts": "ForgeExecFn has no argv form",
-  "lens-review-residuals.ts": "its own seam is `typeof execp`: shell strings only",
-  "merge-guard.ts": "MergeExecFn (merge-target.ts) has no argv form",
   "work-driver-explore.ts": "IssueBodyExec has no argv form",
   "work-driver-adversarial-fix-git.ts":
     "FixExec serves the fix pass's shell-string reads; its develop checks get the argv-aware executor",
@@ -169,7 +167,7 @@ async function main() {
     };
     // No `verifyExecFn`: the gate falls back to its production default.
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as ExtensionAPI,
+      host: { sendUserMessage: () => {} } as unknown as ExtensionAPI,
       repoRoot: f.repo,
       issue: 32,
     };

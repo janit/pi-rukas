@@ -122,7 +122,7 @@ function world(label: string): World {
 /** One whole cycle as far as a park takes it: explore, then handoff on a cap. */
 async function cycle(w: World): Promise<WorkState> {
   const ctx: DriverContext = {
-    pi: { sendUserMessage: () => undefined } as unknown as ExtensionAPI,
+    host: { sendUserMessage: () => undefined } as unknown as ExtensionAPI,
     repoRoot: w.dir,
     issue: ISSUE,
     issueBodyFetcherFn: async () => ({ stdout: w.body }),

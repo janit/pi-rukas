@@ -75,7 +75,7 @@ async function cycle(name: string) {
     return { stdout: "" };
   };
   const ctx = {
-    pi: {},
+    host: {},
     repoRoot: repo,
     issue: ISSUE,
     verifyExecFn: exec,

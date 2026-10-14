@@ -9,11 +9,16 @@ import { dispatchCore } from "./dispatch.ts";
 import { execp as argvExecp } from "./lens-exec.ts";
 import { trace } from "./trace.ts";
 import { BranchAheadError, mechanizedBranchSetup } from "./work-driver-branch-mechanized.ts";
-import { parseWorktreesBlock, runBranchViaOpsDispatch } from "./work-driver-branch-ops.ts";
+import {
+  netTimeoutBranchFailure,
+  parseWorktreesBlock,
+  runBranchViaOpsDispatch,
+} from "./work-driver-branch-ops.ts";
 import { runBranchResiduePass } from "./work-driver-branch-residue.ts";
 // #1093 — cycle-start-ref stamping runs under the single integration lock.
 import { hasCaptureFailure, recordCycleStartRef } from "./work-driver-git.ts";
 import { withIntegrationLock } from "./work-driver-lock.ts";
+import { isNetGitTimeout } from "./work-driver-net-git.ts";
 // #1016 — the argv-honouring executor: the develop path passes `argv` to every
 // git call, and a shell-only exec would run bare `git` and read every check as
 // unreadable (fail closed on every workstream).
@@ -39,7 +44,7 @@ import { applySafetyNet, hasAnyWorktreeEvidence } from "./work-driver-safety-net
 import { verifyStepOutcome } from "./work-driver-verify.ts";
 import { activeIssuesOf, scratchDir } from "./work-driver-workspace.ts";
 import { makeWorktreeProvisionedEvent } from "./workflow-state-events-provision.ts";
-import { type WorkEvent, type WorkState, appendEvent, writeState } from "./workflow-state.ts";
+import { type WorkEvent, type WorkState, appendEvent, persistCycle } from "./workflow-state.ts";
 import { DirtyWorktreeError, gitErrorDetail } from "./worktree.ts";
 
 /**
@@ -67,13 +72,13 @@ export async function stampCycleStartRef(ctx: DriverContext, state: WorkState): 
       ...state,
       pipelineState: { ...state.pipelineState, startRef: ctx.invocationStartRef },
     };
-    await writeState(ctx.repoRoot, stamped);
+    await persistCycle(ctx, stamped);
     return stamped;
   }
   return withIntegrationLock(ctx.repoRoot, async () => {
     // argv-aware: the capture passes argv, which promisify(exec) silently drops.
     const stamped = await recordCycleStartRef(ctx.verifyExecFn ?? argvExecp, ctx.repoRoot, state);
-    if (stamped !== state) await writeState(ctx.repoRoot, stamped);
+    if (stamped !== state) await persistCycle(ctx, stamped);
     return stamped;
   });
 }
@@ -261,6 +266,12 @@ export async function runBranch(
       // ops dispatch with only a trace line and a bare `step-failed:branch`
       // cap downstream: no plumb report, no git stderr in the event log.
       // Plumb the actual git error BEFORE deciding the fallback.
+      if (isNetGitTimeout(err)) {
+        trace(
+          `work-driver: branch step failed on a network git timeout: ${err.message.slice(0, 200)}`,
+        );
+        return netTimeoutBranchFailure(state, err, now);
+      }
       const errDetail = gitErrorDetail(err);
       // #475 — the ops fallback's branch prompt tells ops to
       // `git worktree remove --force` an existing worktree, so falling
@@ -351,7 +362,17 @@ export async function runBranch(
       };
     }
   }
-  return runBranchViaOpsDispatch(ctx, base, workstreamIds, now);
+  try {
+    return await runBranchViaOpsDispatch(ctx, base, workstreamIds, now);
+  } catch (err) {
+    if (isNetGitTimeout(err)) {
+      trace(
+        `work-driver: branch step failed on a network git timeout: ${err.message.slice(0, 200)}`,
+      );
+      return netTimeoutBranchFailure(base, err, now);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -403,7 +424,7 @@ export async function runDevelop(
   // granularity is the step, and a half-finished fan-out is re-entered
   // wholesale.
   const begun = await beginDispatch(
-    ctx.repoRoot,
+    ctx,
     next,
     "develop",
     "developer",

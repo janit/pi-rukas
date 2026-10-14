@@ -281,7 +281,7 @@ async function cycle(
   await mkdir(repoRoot, { recursive: true });
   const seen: Seen[] = [];
   const ctx: DriverContext = {
-    pi: {} as ExtensionAPI,
+    host: {} as ExtensionAPI,
     issue: ISSUE,
     repoRoot,
     dispatchFn: async (_pi, spec, opts) => {

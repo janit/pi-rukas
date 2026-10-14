@@ -62,7 +62,7 @@ async function run(opts: { prLabelWorks: boolean; prCommentWorks: boolean }) {
   try {
     const { forge, calls } = incidentForge(opts);
     const ctx: DriverContext = {
-      pi: fakePi,
+      host: fakePi,
       repoRoot: dir,
       issue: ISSUE,
       dispatchFn: async () => {

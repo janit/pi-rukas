@@ -1,15 +1,21 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as dispatchDeck from "./dispatch-deck.ts";
+import { resolveBudgetKey } from "./lens-budget-key.ts";
 import { execp } from "./lens-exec.ts";
+import type { LensLedgerOutcome } from "./lens-ledger.ts";
 import { partitionDecisions, renderPriorFindingsBlock } from "./lens-residuals.ts";
+import { splitCarried } from "./lens-review-advisory.ts";
 import { resolveLensReviewBranch } from "./lens-review-branch-resolve.ts";
 import { capKillSummary } from "./lens-review-capkill.ts";
 import { runLensChild } from "./lens-review-child.ts";
 import {
+  type AutoDeltaInfo,
   blockedReviewSummary,
   blockedRowsForRoster,
   buildDeltaFullContext,
+  deltaFallbackNote,
+  deltaReviewOf,
   resolveReviewDiff,
   startPersistentBatch,
 } from "./lens-review-diff.ts";
@@ -139,7 +145,7 @@ export async function runLensReview(opts: {
   extraFindings?: Finding[];
   /** #799 — the parent pi for the inner children's slow-run watch (the PM
    * notice half; the watch site has no pi of its own). */
-  pi?: Pick<import("@earendil-works/pi-coding-agent").ExtensionAPI, "sendUserMessage">;
+  pi?: import("./async-jobs-lifecycle.ts").DispatchHost;
   /** Blocking bar; defaults to MEDIUM. See `DEFAULT_REVIEW_THRESHOLD`. */
   threshold?: Severity;
   /**
@@ -151,6 +157,14 @@ export async function runLensReview(opts: {
   branch?: string;
   /** #973 — the PR/MR number for the residual-findings disclosure post. */
   pr?: number;
+  /** #1127 — the operator bypassed the tool-side round budget; recorded on the ledger entry. */
+  overrideCap?: boolean;
+  /** #1127 — receives the run's ledger-write promise once the run has finished;
+   * the caller holds its round reservation until it settles. */
+  onLedgerWrite?: (ledgerWrite: Promise<LensLedgerOutcome>) => void;
+  /** #1127 — the round-budget key the tool admitted this run under (lens-budget-key.ts);
+   * keys the ledger entry when no branch resolves. */
+  ledgerKey?: string;
 }): Promise<LensReviewSummary> {
   const runId = makeRunId();
   const skillsDir = piSkillsDir();
@@ -181,16 +195,26 @@ export async function runLensReview(opts: {
   // confirmed-empty range, cap overflow, nothing supplied) blocks the whole
   // review — a computed diff is never silently empty, never an approval
   // (same rule as #384). Blocked rows use the EXPECTED roster above.
-  let delta: { since: string; head: string; auto?: boolean } | undefined;
+  let delta: AutoDeltaInfo | undefined;
   let diff = "";
   let context: string;
+  // #1128 — the automatic delta reads the SAME ledger key the round cap
+  // budgets under (lens-budget-key.ts). The delta is found when the head
+  // commit sits on exactly one local branch (or a PR is given); a purely
+  // detached head keyed `detached:<sha>` changes key on every commit, so
+  // it gets a full review.
+  const budgetKey = await resolveBudgetKey({
+    cwd: opts.cwd ?? process.cwd(),
+    head: opts.head,
+    pr: opts.pr,
+  });
   const resolved = await resolveReviewDiff({
     diff: opts.diff,
     since: opts.since,
     full: opts.full,
     base: opts.base,
     head: opts.head,
-    branch: branchResolved,
+    branch: budgetKey.key ?? branchResolved,
     cwd: opts.cwd,
   });
   if (resolved.kind === "ok") {
@@ -200,6 +224,7 @@ export async function runLensReview(opts: {
         since: resolved.delta.since,
         head: resolved.delta.head,
         ...(resolved.delta.auto ? { auto: true } : {}),
+        ...(resolved.delta.fallback ? { fallback: resolved.delta.fallback } : {}),
       };
     }
     // #973 review — a delta review with an explicit base+head appends the
@@ -216,6 +241,7 @@ export async function runLensReview(opts: {
             resolved.delta.auto === true,
           )
         : (opts.context ?? "");
+    context += deltaFallbackNote(delta);
   } else {
     context = opts.context ?? "";
   }
@@ -257,17 +283,26 @@ export async function runLensReview(opts: {
   const finishWith = async (
     s: LensReviewSummary,
     hasCritical = false,
-  ): Promise<LensReviewSummary> =>
-    (
-      await finishLensReview(
-        s,
-        threshold,
-        opts.cwd,
-        branchResolved,
-        { hasCritical, headSha, head: opts.head },
-        opts.pr,
-      )
-    ).summary;
+  ): Promise<LensReviewSummary> => {
+    const finished = await finishLensReview(
+      s,
+      threshold,
+      opts.cwd,
+      branchResolved,
+      {
+        hasCritical,
+        headSha,
+        head: opts.head,
+        overrideCap: opts.overrideCap,
+        ledgerKey: opts.ledgerKey,
+      },
+      opts.pr,
+    );
+    // #1127 review — the caller's round reservation is held until this write
+    // settles (see lens-round-cap.ts `release`); the write is NOT awaited here.
+    opts.onLedgerWrite?.(finished.ledgerWrite);
+    return finished.summary;
+  };
   if (resolved.kind === "blocked") {
     const blockRows = blockedRowsForRoster(roster, resolved.problem);
     const blocked = blockedReviewSummary(runId, opts.extraFindings, roster, blockRows, threshold);
@@ -427,8 +462,10 @@ export async function runLensReview(opts: {
   const { kept, suppressed } = partitionDecisions(deduped, decisions);
   // #1105 — open rows this round did not re-report, whose cited code is
   // unchanged, still stand: a lens omitting a known finding is not a fix.
-  // They are reported alongside this round's findings.
-  const reported = [...kept, ...(recorded?.ok ? recorded.carried : [])];
+  // They are reported alongside this round's findings. #1140 — a carried row
+  // on a file outside the PR's diff is advisory (lens-review-advisory.ts).
+  const carried = await splitCarried(recorded, opts.cwd, opts.base, headSha);
+  const reported = [...kept, ...carried.blocking];
   const verdict = computeVerdict(reported, lensResults, threshold);
   // #973 — the round-cap rule's inputs for the ledger write: hasCritical
   // from the deduped findings, headSha from the ref the review actually
@@ -450,12 +487,13 @@ export async function runLensReview(opts: {
       findings: reported,
       ...(suppressed.length > 0 ? { suppressed } : {}),
       ...(memoryNote ? { memoryNote } : {}),
+      ...carried.fields,
       usage: aggregateLensUsage(lensResults),
       // #543 — a dispatch-cap kill on any lens child (loop detector / token
       // budget) is surfaced on the summary so the driver emits the fixed-literal
       // cap-hit (F4g) instead of a silent 1-of-6 loss.
       ...capKillSummary(lensResults),
-      ...(delta ? { deltaReview: { since: delta.since, head: delta.head } } : {}),
+      ...(delta ? { deltaReview: deltaReviewOf(delta) } : {}),
     },
     hasCritical,
   );

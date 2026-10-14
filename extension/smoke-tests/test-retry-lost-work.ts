@@ -128,7 +128,7 @@ const severed = {
     });
     const devPrompts: string[] = [];
     const ctx: DriverContext = {
-      pi,
+      host: pi,
       repoRoot: dir,
       issue: 960,
       issueBodyFetcherFn: async () => ({ stdout: "title:\tmock\nstate:\tOPEN\n\nmock body" }),

@@ -56,6 +56,8 @@ git(repo, ["add", "."]);
 git(repo, ["commit", "-q", "-m", "base"]);
 git(repo, ["remote", "add", "origin", originDir]);
 git(repo, ["push", "-q", "-u", "origin", "main"]);
+// A real clone carries refs/remotes/origin/HEAD; the mainline is resolved from it (#1134).
+git(repo, ["remote", "set-head", "origin", "main"]);
 // The vipune ea8c836 shape, as a real commit on a real branch.
 git(repo, ["checkout", "-q", "-b", "feature/issue-279"]);
 writeFileSync(
@@ -89,7 +91,7 @@ try {
   {
     let seenContext = "";
     const ctx = {
-      pi: fakePi,
+      host: fakePi,
       repoRoot: repo,
       issue: 279,
       lensReviewFn: async (args: { context: string }) => {
@@ -121,7 +123,7 @@ try {
   {
     // Route-only: a widening must never fail the cycle by itself.
     const ctx = {
-      pi: fakePi,
+      host: fakePi,
       repoRoot: repo,
       issue: 279,
       lensReviewFn: async () => mkLensSummary("APPROVED"),
@@ -141,7 +143,7 @@ try {
     try {
       let seenContext = "";
       const ctx = {
-        pi: fakePi,
+        host: fakePi,
         repoRoot: repo,
         issue: 279,
         lensReviewFn: async (args: { context: string }) => {
@@ -172,7 +174,7 @@ try {
     const prompts: string[] = [];
     const execCalls: Array<{ cmd: string; cwd?: string }> = [];
     const ctx = {
-      pi: fakePi,
+      host: fakePi,
       repoRoot: root,
       issue: 279,
       verifyExecFn: async (cmd: string, o?: { cwd?: string }) => {

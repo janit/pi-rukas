@@ -23,7 +23,7 @@ export function registerAdversarialTool(pi: ExtensionAPI) {
     name: "adversarial_loop",
     label: "Adversarial Loop",
     description:
-      "Async adversarial gate: review → developer fix → re-review, up to 3 rounds. Returns a job handle immediately; the final verdict (APPROVED or REJECTED + findings) arrives as an [ensemble:async] message. End your turn after dispatching.",
+      "Async adversarial gate: review → developer fix → re-review, up to 3 rounds. Returns a job handle immediately; the final verdict (APPROVED or REJECTED + findings) arrives as an [ensemble:async] message. End your turn after dispatching. `reportOnly: true` runs exactly one review: no developer dispatch, no file changes, verdict recorded as usual. A reportOnly review records one verdict; only CRITICAL_ISSUES_FOUND (or an unreadable reply) fails it. Otherwise a round that needs a fix REQUIRES `workCwd` (the worktree fixes are applied in) — without it the loop stops after the verdict with an error naming workCwd, dispatching no developer. Fix developers run with cwd = workCwd, which must be a separate worktree of the calling repository, not its own checkout. Changes to the calling repository during a fix round are reported as a VIOLATION and fail the result (`ok: false`) — including unrelated edits you make in that repo while the round runs, since attribution is not verified, so do not edit the calling repo during a fix round. A caller repo that cannot be snapshotted never approves: the fix round is refused, or the result is not ok. Not detected: writes outside the calling repository and its shared git dir (`hooks/`, `config` are checked; refs, objects, gitignored paths, `.git/info/exclude` and nested-repo contents are not).",
     parameters: Type.Object({
       diff: Type.Optional(
         Type.String({
@@ -49,7 +49,13 @@ export function registerAdversarialTool(pi: ExtensionAPI) {
       workCwd: Type.Optional(
         Type.String({
           description:
-            "Worktree/repo path where developer applies fixes and `git diff <base>...<head>` runs (defaults to process cwd).",
+            "Worktree/repo path where `git diff <base>...<head>` runs (defaults to process cwd). Fixes are applied here, so a fix round REQUIRES an explicit workCwd (not needed with reportOnly); without it the loop stops after the verdict with an error.",
+        }),
+      ),
+      reportOnly: Type.Optional(
+        Type.Boolean({
+          description:
+            "When true: exactly one reviewer dispatch, zero fix-developer dispatches, zero file changes. Records the verdict and ledger entry as usual.",
         }),
       ),
     }),
@@ -60,7 +66,14 @@ export function registerAdversarialTool(pi: ExtensionAPI) {
         base?: string;
         head?: string;
         workCwd?: string;
+        reportOnly?: boolean;
       };
+      // #1154 — the verdict policy is set after the raw spread, so a caller
+      // cannot spoof it: reportOnly picks "terminal"; anything else gets none.
+      const policy =
+        params.reportOnly === true
+          ? { reportOnly: true as const, reportVerdict: "terminal" as const }
+          : { reportOnly: false as const, reportVerdict: undefined };
       const { jobId } = startJob(pi, {
         label: "adversarial_loop",
         role: "adversarial-loop",
@@ -69,7 +82,17 @@ export function registerAdversarialTool(pi: ExtensionAPI) {
         // sub-states; per-round entries show the actual child running now.
         skipDeck: true,
         work: (signal, hooks) =>
-          runAdversarialLoop({ ...params, pi }, signal, hooks.jobId, computeRangeDiff),
+          runAdversarialLoop(
+            {
+              ...params,
+              pi,
+              fixFence: { callerCwd: process.cwd() },
+              ...policy,
+            },
+            signal,
+            hooks.jobId,
+            computeRangeDiff,
+          ),
       });
       return {
         content: [

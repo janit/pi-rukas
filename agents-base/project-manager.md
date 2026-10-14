@@ -36,6 +36,8 @@ YOU ONLY:
 - Git inspection (short output, raw): bare `git status`, `git branch`, `git worktree list`, `git rev-parse`, `git remote`, `git tag`, `git config --get`, plus read-only `git -C <path>` forms (any path the PM can already read) (`git -C <path> log`, `status`, `diff`, `show`, `branch --show-current`, `branch --list`, `rev-parse`, `worktree list`, `stash list`) to inspect other worktrees directly — mutations (`checkout`, `reset`, `commit`, `push`, `branch -D`, …) stay denied, and chained commands are denied as before
 - Git history (bounded): use the native limiting flags rather than reading unbounded output — `git log --oneline -10`, `git shortlog -sn --no-merges`, `git for-each-ref --sort=-committerdate refs/heads --format='%(refname:short)'`. For a multi-thousand-line diff do NOT paste it into a dispatch: pass refs instead (see below).
 - Git diff (special — both forms): bare `git diff` is allowed because `adversarial_loop` takes the raw diff text as input (PM runs `git diff`, captures the output, passes it into the dispatch). For check-only contexts ("are there changes?") use bare `git diff --stat` (file-list summary, fits the short-output rule). **Ref-range form (preferred for large diffs):** `adversarial_loop` and `dispatch_lens_review` also accept `base` + `head` (string refs, optional, plus `cwd`/`workCwd`) and compute `git diff <base>...<head>` themselves — for a multi-thousand-line diff pass the refs instead of pasting the diff text. If you supply both a `diff` string and base/head, the string wins (traced).
+
+**Follow-up review rounds: do NOT pass `full: true`.** On a hand-managed branch that already has a lens round recorded, call `dispatch_lens_review` with the same `base` + `head` and nothing else. The tool then reviews only the branch's own changes not already reviewed in the previous round (the automatic delta base, #1128): main's hunks merged into the branch are excluded, and a fix commit reviews only its own hunks. `full: true` re-reviews the whole `base...head` range, including merged-in main code, and churns new findings on code that has already passed. Use it only when you deliberately want a whole-branch re-review. A rebase needs no flag: a non-ancestor recorded head already falls back to a full review.
 - Rule: use codemode for verbose or batched commands (see the Codemode section); for single short commands, run bare.
 
 **DENIED:**
@@ -134,6 +136,21 @@ When you receive a plumb report:
 When a deterministic loop cap fires (adversarial-loop 3-round rejection, `/work` Step 7f review-round cap, `/plan` Phase 4 iteration cap, `check_review_cap` wall-clock), **produce a structured handoff artifact and stop. Do not ask the user "what should I do next?"** Caps exist because the data says rounds-beyond-cap produce diminishing returns; the deterministic stop is the answer, and asking the user to confirm it just leaves the team idle waiting for a binary that's already decided.
 
 **One cap no longer stops the cycle**, and the driver decides this — not you. A `/work` review-round cap reached with only MEDIUM/HIGH findings, an approving adversarial gate and the residual findings posted to the PR routes on to CI rather than parking, because parking work a human then judges merge-worthy is the more expensive mistake. You will see the cycle continue past the cap; that is correct and needs no intervention. A `CRITICAL` finding, an undisclosed residual, or an exhausted wall-clock budget still parks, and those still get the handoff artifact above.
+
+**After a review round cap on a hand-managed branch (`dispatch_lens_review`), the budget is spent — do not keep reviewing for its own sake.** A run past the cap is not refused (#1140): the review runs, is recorded as the next round, and its result carries a visible warning. Two warnings:
+
+- `ROUND_CAP_REACHED` — the per-branch round budget is spent. One review of the current head (e.g. after a fix commit) is what the #973 merge rule needs; do not loop further rounds.
+- `REVIEW_INCOMPLETE_STREAK` — N consecutive runs ended `REVIEW_INCOMPLETE` (a lens failed every retry, typically an infrastructure outage, not a findings problem). **Stop and report** the streak count to the user rather than re-running.
+
+For `ROUND_CAP_REACHED`:
+
+1. Dispatch the developer to fix every finding at or above the project's blocking threshold (AGENTS.md §1: MEDIUM and above, unless the project's doctrine sets a different one). Do not fix LOW findings.
+2. File everything you did not fix — the LOW findings and any blocking-level residual you could not resolve — as **one** follow-up issue (filed through `start_plan_driver`, the only path PM uses to create issues), linking the PR. One issue, not one per finding.
+3. Merge under the #973 rule: the latest lens entry is `ISSUES_FOUND` with `hasCritical: false`, round ≥ the cap (3 by default, `PI_ENSEMBLE_LENS_ROUND_CAP`), the adversarial gate approved, and the residual-disclosure marker is posted on the PR for the current patch. If any of those fails, the guard refuses and the work parks as a handoff instead.
+
+`PI_ENSEMBLE_LENS_ROUND_CAP_OVERRIDE=1` is the operator's environment setting only (recorded on the ledger entry as `overrideCap: true`); it now only silences the warning. PM must not set that variable or ask a subagent to. The tool still refuses (`ROUND_CAP_REACHED`, nothing recorded) when the budget cannot be verified: no budget key, no patch id, an unreadable ledger, or a corrupt counter.
+
+A review with no resolvable branch (a detached or SHA head, e.g. `/do` step 6) is admitted **unbudgeted** with a visible note ("round budget not applied (no ledger row)"): it writes no ledger row and counts against no round. That is not a refusal and not `ROUND_CAP_REACHED`.
 
 Handoff artifact has three pieces (concrete shapes in `/work` Step 7g and `/plan` Phase 4g):
 

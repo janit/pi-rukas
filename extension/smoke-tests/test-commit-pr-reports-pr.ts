@@ -63,6 +63,8 @@ async function run(name: string, forge: Forge) {
   const baseSha = (await git(repo, ["rev-parse", "HEAD"])).stdout.trim();
   await addLocalRemote(root, repo);
   await git(repo, ["push", "-q", "-u", "origin", "main"]);
+  // Commit evidence resolves the mainline from origin/HEAD.
+  await git(repo, ["remote", "set-head", "origin", "main"]);
   const wt = path.join(repo, ".worktrees", `issue-${ISSUE}-default`);
   await git(repo, ["worktree", "add", "-q", "--detach", wt, baseSha]);
   writeFileSync(path.join(wt, "feature.txt"), "feature\n");
@@ -92,7 +94,7 @@ async function run(name: string, forge: Forge) {
     return { stdout: "" };
   };
   const ctx = {
-    pi: {},
+    host: {},
     repoRoot: repo,
     issue: ISSUE,
     verifyExecFn: exec,

@@ -121,6 +121,7 @@ function makeConvergeExec(
       diffRead += 1;
       return { stdout: filesForDiff().join("\n") + "\n" };
     }
+    if (cmd.includes("rev-parse --verify --quiet --end-of-options origin/")) return { stdout: `${"a".repeat(40)}\n` };
     if (cmd.startsWith("git rev-list --count")) return { stdout: "1\n" };
     if (cmd === "git rev-parse HEAD") return { stdout: BASE_SHA + "\n" };
     if (cmd.startsWith("git symbolic-ref")) return { stdout: "refs/heads/main\n" };
@@ -157,7 +158,7 @@ async function runConvergeCycle(
       execOut.diffReads = exec.diffReads;
     }
     const ctx: DriverContext = {
-      pi: makeFakePi().pi,
+      host: makeFakePi().pi,
       repoRoot: dir,
       issue,
       issueBodyFetcherFn: mockIssueBodyOk,
@@ -341,7 +342,7 @@ async function runConvergeCycle(
         return { stdout: "" };
       };
       const ctx: DriverContext = {
-        pi: makeFakePi().pi,
+        host: makeFakePi().pi,
         repoRoot: dir,
         issue: 1001,
         verifyExecFn: exec,
@@ -420,7 +421,7 @@ async function runConvergeCycle(
           : commandOf(cmd, o) === "git status --porcelain"
             ? { stdout: "M  src/a.ts\nM  src/b.ts\n" }
             : { stdout: "" };
-      const verdict = await runConvergeGate({ pi: makeFakePi().pi, repoRoot: dir, issue: 1010, verifyExecFn: exec }, spec);
+      const verdict = await runConvergeGate({ host: makeFakePi().pi, repoRoot: dir, issue: 1010, verifyExecFn: exec }, spec);
       assert(verdict !== null && verdict.absent.length === 0, "AC792f: converge gate PASSES (all code done, one no-diff)");
       assert(verdict?.deliverables.find((d) => d.id === "d3")?.status === "no-diff", "AC792h: no-diff status persisted in gate result");
     } finally {

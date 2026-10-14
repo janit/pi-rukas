@@ -11,10 +11,9 @@ import { type ExecFn, gitErrorDetail } from "./worktree.ts";
 
 // #981 fix-round — bound every git call. 30s for the local reads (the same
 // bound review-branch.ts uses for its git probes); the gate's `git fetch`
-// uses FETCH_TIMEOUT_MS below (the sharedFetch value from
-// work-driver-branch-mechanized.ts — network-bound, same maxBuffer rationale).
+// goes through runNetGit (work-driver-net-git.ts), which bounds it by
+// PI_ENSEMBLE_GIT_NET_TIMEOUT_MS.
 export const GIT_TIMEOUT_MS = 30_000;
-export const FETCH_TIMEOUT_MS = 300_000;
 
 /** Resolve one rev to a SHA (trimmed), or undefined when the read failed. */
 async function revToSha(execFn: ExecFn, tree: string, rev: string): Promise<string | undefined> {
@@ -194,7 +193,10 @@ export async function rangeAllNonEmpty(
       cwd: tree,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: 64 * 1024,
-      argv: ["rev-list", `${tipSha}..${treeSha}`],
+      // Three-dot + --right-only is the same set as `tipSha..treeSha` (the
+      // tree's commits not on the tip), written in the same range notation as
+      // every other driver count (#1134).
+      argv: ["rev-list", "--right-only", `${tipSha}...${treeSha}`],
     });
     shas = stdout
       .trim()

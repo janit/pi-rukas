@@ -12,6 +12,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execp } from "./lens-exec.ts";
 import { trace } from "./trace.ts";
+import { runNetGit } from "./work-driver-net-git.ts";
 import { restoreRefProblem, restoreRootToRef } from "./work-driver-restore.ts";
 import type { WorkState } from "./workflow-state.ts";
 
@@ -107,6 +108,40 @@ export async function detectMainline(
 }
 
 /**
+ * #1134 follow-up — detectMainline as a total function for its callers.
+ *
+ * A caller that reads `"branch" in mainline` on a value that is undefined, or
+ * on an unexpected shape, gets a TypeError rather than a verdict, and a throw
+ * from the detector escapes the gate that asked. Both become the same
+ * unresolved result a failed detection produces, carrying the reason.
+ */
+export async function resolveMainline(
+  repoRoot: string,
+  execFn: VerifyExecFn,
+  detect: typeof detectMainline = detectMainline,
+): Promise<{ branch: string } | { ok: false; reason: string }> {
+  let m: unknown;
+  try {
+    m = await detect(repoRoot, execFn);
+  } catch (err) {
+    const msg = ((err as Error)?.message ?? String(err)).slice(0, 200);
+    return { ok: false, reason: `mainline detection threw: ${msg}` };
+  }
+  if (m && typeof m === "object") {
+    if ("branch" in m && typeof m.branch === "string" && m.branch.length > 0) {
+      return { branch: m.branch };
+    }
+    if ("reason" in m && typeof m.reason === "string" && m.reason.length > 0) {
+      return { ok: false, reason: m.reason };
+    }
+  }
+  return {
+    ok: false,
+    reason: "mainline detection returned an unexpected result",
+  };
+}
+
+/**
  * Restore the operator's checkout after a merge.
  *
  * #1093 — the restore target is the cycle-start ref (`startRef`: the branch
@@ -157,18 +192,26 @@ export async function restoreCheckout(opts: {
   // 1. Fetch origin --prune. Every git command here is argv-form (#1093): a
   // ref is data, never shell text.
   try {
-    await execFn("git", {
+    // #1095 — network call: non-interactive env + bounded wait.
+    await runNetGit(execFn, "git", {
       cwd: repoRoot,
-      maxBuffer: 1024 * 1024,
       argv: ["fetch", "origin", "--prune"],
     });
   } catch (err) {
     notes.push(`git fetch origin --prune failed: ${(err as Error).message?.slice(0, 200)}`);
-    // Continue — subsequent steps may still work with stale refs.
+    // Continue — subsequent steps may still work with stale refs. #1095: a
+    // timeout is also a note, carrying "network git timed out" as its named
+    // cause. Not a thrown step failure: the merge has already succeeded, and a
+    // halt here routes a merged PR to handoff (see work-driver-events.ts).
   }
 
   // 2. The restore target — the ONE rule, shared with the handoff path.
-  const resolved = await resolveRestoreTarget({ execFn, repoRoot, mainline, startRef });
+  const resolved = await resolveRestoreTarget({
+    execFn,
+    repoRoot,
+    mainline,
+    startRef,
+  });
   notes.push(...resolved.notes);
   const target = resolved.target;
   if (!target) return notes;
@@ -177,7 +220,11 @@ export async function restoreCheckout(opts: {
   // 3. Checkout the target via the single non-forcing restore primitive.
   // Tolerates already-there; a refusal (dirty tree, detached HEAD) leaves the
   // tree as it is and the note carries the exact command to run by hand.
-  const restore = await restoreRootToRef(execFn, { repoRoot, ref: target, label: "merged" });
+  const restore = await restoreRootToRef(execFn, {
+    repoRoot,
+    ref: target,
+    label: "merged",
+  });
   if (!restore.checkedOut) {
     notes.push(`repoRoot was NOT restored to ${target}: ${restore.detail ?? "unknown error"}`);
     // A refused checkout performs no further git mutation: no pull, and no
@@ -198,9 +245,9 @@ export async function restoreCheckout(opts: {
   // mainline. Tolerate already-up-to-date.
   if (restore.restored && onMainline && mainline) {
     try {
-      await execFn("git", {
+      // #1095 — network call: non-interactive env + bounded wait.
+      await runNetGit(execFn, "git", {
         cwd: repoRoot,
-        maxBuffer: 1024 * 1024,
         argv: ["pull", "--ff-only", "origin", mainline],
       });
     } catch (err) {
@@ -258,7 +305,10 @@ export async function resolveRestoreTarget(opts: {
   const { execFn, repoRoot, mainline, startRef } = opts;
   const toMainline = mainline ? `restored to ${mainline}` : "no mainline to restore to";
   if (startRef === undefined) {
-    return { target: mainline, notes: [`start ref was not recorded; ${toMainline}`] };
+    return {
+      target: mainline,
+      notes: [`start ref was not recorded; ${toMainline}`],
+    };
   }
   const problem = await restoreRefProblem(execFn, repoRoot, startRef);
   if (problem === undefined) return { target: startRef, notes: [] };

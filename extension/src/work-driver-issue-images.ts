@@ -25,7 +25,6 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { dispatchCore } from "./dispatch.ts";
 import { trace } from "./trace.ts";
 import type { DispatchImage } from "./types.ts";
@@ -179,18 +178,19 @@ type DispatchFn = NonNullable<DriverContext["dispatchFn"]>;
  * built in several files). With no images the function is returned as it is.
  */
 export function withIssueImages<
+  H,
   S extends { prompt: string; images?: DispatchImage[] },
   A extends unknown[],
   R,
 >(
-  dispatch: (pi: ExtensionAPI, spec: S, ...rest: A) => R,
+  dispatch: (host: H, spec: S, ...rest: A) => R,
   images: IssueImage[],
   section = "",
-): (pi: ExtensionAPI, spec: S, ...rest: A) => R {
+): (host: H, spec: S, ...rest: A) => R {
   if (images.length === 0) return dispatch;
   const parts = toDispatchImages(images);
-  return (pi, spec, ...rest) =>
-    dispatch(pi, { ...spec, prompt: spec.prompt + section, images: parts }, ...rest);
+  return (host, spec, ...rest) =>
+    dispatch(host, { ...spec, prompt: spec.prompt + section, images: parts }, ...rest);
 }
 
 /**

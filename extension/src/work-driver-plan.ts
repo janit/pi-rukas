@@ -14,7 +14,6 @@ import { extractListField, sliceMarkdownSection } from "./work-driver-plan-parse
 
 // Re-exported: several modules read plan/spec markdown through this module.
 export { sliceMarkdownSection, splitOutsideParens } from "./work-driver-plan-parse.ts";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { transcriptPathFor } from "./spawn-support.ts";
 import type { DispatchResult } from "./types.ts";
 import type { DriverContext } from "./work-driver-context.ts";
@@ -105,7 +104,7 @@ export async function runPlan(
   // process death inside the dispatch window is visible on disk rather than
   // leaving the file at the previous step boundary still claiming `running`.
   const begun = await beginDispatch(
-    ctx.repoRoot,
+    ctx,
     next,
     "plan",
     "explore",
@@ -127,7 +126,7 @@ export async function runPlan(
     deck: { ...driverDeckOpts(ctx.issue, "plan", "plan"), label: "plan" },
   };
   try {
-    result = await dispatch(ctx.pi, { role: "explore", prompt }, primaryOpts);
+    result = await dispatch(ctx.host, { role: "explore", prompt }, primaryOpts);
   } catch (err) {
     return appendEvent(clearDispatch(next, begun.jobId), {
       kind: "dispatch-failed",
@@ -204,7 +203,7 @@ export async function runPlan(
   if (planKill) {
     const recovered = await planTimeoutCorrective(
       ctx,
-      ctx.pi,
+      ctx.host,
       dispatch,
       prompt,
       planKill,
@@ -282,7 +281,7 @@ export async function runPlan(
     // burned 73.5M cache tokens before the wall-clock kill — twice.
     const correctivePrompt = planCorrectivePrompt(prompt, steer);
     const retry = await dispatch(
-      ctx.pi,
+      ctx.host,
       { role: "explore", prompt: correctivePrompt },
       {
         label: "plan:corrective",

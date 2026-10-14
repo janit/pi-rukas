@@ -97,7 +97,7 @@ async function runFanout(
     });
     const labels: string[] = [];
     const ctx: DriverContext = {
-      pi,
+      host: pi,
       repoRoot: dir,
       issue,
       issueBodyFetcherFn: async (n) => ({ stdout: `title:\tmock #${n}\n\nmock body` }),

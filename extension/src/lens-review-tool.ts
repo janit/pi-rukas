@@ -1,8 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { startJob } from "./async-jobs.ts";
-import { renderSummary } from "./lens-review-format.ts";
+import type { LensLedgerOutcome } from "./lens-ledger.ts";
+import { type LensReviewSummary, renderSummary } from "./lens-review-format.ts";
 import { LENS_REVIEW_DIFF_DESCRIPTION, MAX_LENS_ATTEMPTS, runLensReview } from "./lens-review.ts";
+import { admitLensRound } from "./lens-round-cap.ts";
 import { trace } from "./trace.ts";
 import type { DispatchResult } from "./types.ts";
 
@@ -48,13 +50,13 @@ export function registerLensReviewTool(pi: ExtensionAPI) {
       since: Type.Optional(
         Type.String({
           description:
-            "#973 — the delta base: a commit ref the review diffs from (`git diff <since>..<head>`). When given, the lenses review ONLY the delta, with the full base...head range as context. Without it, the delta base DEFAULTS to this branch's latest lens ledger entry's headSha when that SHA is an ancestor of HEAD (an automatic delta review); the first review on a branch (no ledger entry) is always a full review. An empty delta (no changes since the base) is a no-review outcome — no re-review, no ledger entry. Pass `full: true` to force a full review.",
+            "#973 — the delta base: a commit ref to review changes since. When given, the lenses review only the changes since that commit (the same range an automatic delta uses). Without it, the delta base DEFAULTS to the last reviewed head recorded for this branch (the round-budget key's latest lens ledger entry) when that SHA is an ancestor of HEAD — an automatic delta review, which subtracts hunks already reviewed (hunk-identity against that head) when base is given. The first review on a branch (no ledger entry) is always a full review. An empty delta (nothing new since the last review) is a no-review outcome — no re-review, no ledger entry. Pass `full: true` to force a full review.",
         }),
       ),
       full: Type.Optional(
         Type.Boolean({
           description:
-            "#973 — force a full review: the automatic delta base (the latest lens ledger entry's headSha) is not consulted. An explicit `since` still wins when given. An explicit base + head (with no `since`) is ALWAYS a full review — the automatic delta base only applies to a bare branch/cwd review.",
+            "#973 — force a full review: the automatic delta base (the latest lens ledger entry's headSha) is not consulted. An explicit `since` still wins when given. An explicit base + head (with no `since`) is not forced to a full review: base + head define the context range, and the automatic delta base still applies when a branch resolves.",
         }),
       ),
       pr: Type.Optional(
@@ -91,7 +93,52 @@ export function registerLensReviewTool(pi: ExtensionAPI) {
         skipDeck: true,
         work: async (signal): Promise<DispatchResult> => {
           const start = Date.now();
-          const summary = await runLensReview({ ...params, signal });
+          // #1127 — the round budget runs BEFORE any lens is dispatched; a
+          // fail-closed refusal is the terminal ROUND_CAP_REACHED summary,
+          // nothing recorded. #1140 — a run past the cap is admitted and its
+          // warning arrives as the admission note.
+          // An admitted run holds its reservation until it settles, so a
+          // concurrent call in this process cannot pass the same round.
+          // The bypass is the operator's env var (read inside admitLensRound) —
+          // never a tool parameter, so the model cannot set it (#1127).
+          const admission = await admitLensRound({
+            cwd: params.cwd,
+            head: params.head,
+            pr: params.pr,
+          });
+          let summary: LensReviewSummary;
+          let admissionNote: string | undefined;
+          let unrecordedNote: string | undefined;
+          if (admission.admitted) {
+            admissionNote = admission.note;
+            // The round is held until the run's ledger write settles, so a
+            // back-to-back call cannot be admitted to the same round. The
+            // settled write's outcome is reported on this run's result (#1127).
+            let ledgerWrite: Promise<LensLedgerOutcome> | undefined;
+            try {
+              summary = await runLensReview({
+                ...params,
+                overrideCap: admission.overrideCap,
+                ledgerKey: admission.key,
+                signal,
+                onLedgerWrite: (w) => {
+                  ledgerWrite = w;
+                },
+              });
+            } finally {
+              unrecordedNote = await admission.release(ledgerWrite);
+            }
+          } else {
+            summary = admission.refusal;
+          }
+          // A refusal's note is the whole report (renderSummary), so it is not
+          // appended a second time.
+          // #1140 — only the fail-closed refusals remain (the streak warns).
+          const refused = summary.verdict === "ROUND_CAP_REACHED";
+          const noteAppended = summary.note && !refused ? summary.note : undefined;
+          const extra = [noteAppended, admissionNote, unrecordedNote].filter(
+            (n): n is string => !!n,
+          );
           // ok is true when the review completed AND the verdict is neither
           // CRITICAL nor INCOMPLETE. INCOMPLETE means at least one lens
           // failed all retries (#3) — the review did NOT actually run every
@@ -108,8 +155,9 @@ export function registerLensReviewTool(pi: ExtensionAPI) {
             ok:
               !summary.noReview &&
               summary.verdict !== "CRITICAL_ISSUES_FOUND" &&
-              summary.verdict !== "REVIEW_INCOMPLETE",
-            text: summary.note ? `${text}\n\n${summary.note}` : text,
+              summary.verdict !== "REVIEW_INCOMPLETE" &&
+              !refused,
+            text: extra.length > 0 ? `${text}\n\n${extra.join("\n\n")}` : text,
             toolUses: [],
             ms: Date.now() - start,
             exitCode: 0,

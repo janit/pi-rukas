@@ -9,15 +9,6 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import {
-  devCommit,
-  fixCtx,
-  fixState,
-  git,
-  repoWithFile,
-  singleState,
-  tmpDir,
-} from "./lib/adversarial-fix-fixtures.ts";
 import type { DispatchResult } from "../src/types.ts";
 import {
   namedPaths,
@@ -29,6 +20,15 @@ import type { DriverContext } from "../src/work-driver-context.ts";
 import { nextStep } from "../src/work-driver-context.ts";
 import { explainCap } from "../src/work-driver-explain.ts";
 import type { WorkState } from "../src/workflow-state.ts";
+import {
+  devCommit,
+  fixCtx,
+  fixState,
+  git,
+  repoWithFile,
+  singleState,
+  tmpDir,
+} from "./lib/adversarial-fix-fixtures.ts";
 
 let exit = 0;
 function assert(cond: boolean, msg: string) {
@@ -50,7 +50,7 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
   try {
     const devSpawns: string[] = [];
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 1114,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),
@@ -91,7 +91,7 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
   const dir = repoWithFile("fix-noop");
   try {
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 1114,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),
@@ -124,7 +124,7 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
   const dir = repoWithFile("fix-unnamed");
   try {
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 1114,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),
@@ -177,7 +177,7 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
   const dir = repoWithFile("fix-named");
   try {
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 1114,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),
@@ -210,7 +210,7 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
   const dir = repoWithFile("fix-dispatch-fail");
   try {
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 1114,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),
@@ -248,7 +248,7 @@ process.env.PI_ENSEMBLE_ADVERSARIAL_EMPTY_SKIP = "0";
     git(dir, "add -A");
     git(dir, 'commit -q -m "add x"');
     const ctx: DriverContext = {
-      pi: { sendUserMessage: () => {} } as unknown as DriverContext["pi"],
+      host: { sendUserMessage: () => {} } as unknown as DriverContext["host"],
       repoRoot: dir,
       issue: 1114,
       issueBodyFetcherFn: async () => ({ stdout: "mock" }),

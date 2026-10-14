@@ -424,6 +424,12 @@ export type WorkEvent =
       headSha?: string;
       /** False when the state on disk is one the re-entry check refuses. */
       resumable: boolean;
-    };
+    }
+  /**
+   * S4a (#1162) — the cycle was interrupted (SIGTERM / SIGINT, via
+   * `markInterrupted`). `reason` is the operator-facing why; renderers read
+   * the most recent `interrupted` event for it.
+   */
+  | { kind: "interrupted"; at: number; reason: string };
 /** Discriminator union of event kinds — useful for callers that switch on it. */
 export type WorkEventKind = WorkEvent["kind"];

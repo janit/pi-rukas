@@ -90,6 +90,14 @@ export interface LedgerEntry {
    * present (#1039); absent when the head could not be resolved; a non-SHA
    * value is malformed and refused by the round-cap path. */
   headSha?: string;
+  /** #1127 — lens entries only: the operator passed `overrideCap: true` to
+   * dispatch_lens_review, so this run was allowed past the tool-side round
+   * budget. Recorded so an audit can see which rounds were forced. */
+  overrideCap?: boolean;
+  /** #1127 — lens entries only: consecutive REVIEW_INCOMPLETE runs since the
+   * last completed round. An incomplete run does not advance `round`, so this
+   * is the budget's only record that the branch keeps spending six-lens runs. */
+  incompleteRuns?: number;
 }
 
 interface LedgerFile {
@@ -233,7 +241,10 @@ export async function workingTreePatchId(
   // because the committed patchId will no longer match.
   const untracked: string[] = [];
   try {
-    const { stdout } = await execFn("git status --porcelain", { cwd, maxBuffer: 256 * 1024 });
+    const { stdout } = await execFn("git status --porcelain", {
+      cwd,
+      maxBuffer: 256 * 1024,
+    });
     for (const line of stdout.split("\n")) {
       if (line.startsWith("??")) untracked.push(line.slice(3).trim());
     }
@@ -275,8 +286,7 @@ export function adversarialPassed(result: {
   errorStop?: unknown;
   killCause?: string;
 }): boolean {
-  if (result.loopOutcome === "rejected") return false;
-  if (result.loopOutcome === "infra-failure") return false;
+  if (result.loopOutcome && result.loopOutcome !== "approved") return false;
   if (!result.ok) return false;
   if (result.errorStop || result.killCause) return false;
   return true;

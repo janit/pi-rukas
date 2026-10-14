@@ -76,7 +76,7 @@ async function singleWorkstream(name: string, verifyCmd: string) {
     },
   };
   const ctx = (exec: Exec): DriverContext => ({
-    pi: { sendUserMessage: () => {} } as unknown as ExtensionAPI,
+    host: { sendUserMessage: () => {} } as unknown as ExtensionAPI,
     repoRoot: f.repo,
     issue: 6,
     verifyExecFn: exec,

@@ -79,7 +79,7 @@ async function capOf(dir: string, issue: number): Promise<string | undefined> {
     let attempts = 0;
     let exploreDispatched = false;
     const ctx: DriverContext = {
-      pi: makeFakePi(),
+      host: makeFakePi(),
       repoRoot: dir,
       issue: 700,
       issueBodyFetcherFn: async (n, _cwd) => {
@@ -114,7 +114,7 @@ async function capOf(dir: string, issue: number): Promise<string | undefined> {
     let attempts = 0;
     let exploreDispatched = false;
     const ctx: DriverContext = {
-      pi: makeFakePi(),
+      host: makeFakePi(),
       repoRoot: dir,
       issue: 701,
       issueBodyFetcherFn: async (n, _cwd) => {
@@ -150,7 +150,7 @@ async function capOf(dir: string, issue: number): Promise<string | undefined> {
     let attempts = 0;
     let exploreDispatched = false;
     const ctx: DriverContext = {
-      pi: makeFakePi(),
+      host: makeFakePi(),
       repoRoot: dir,
       issue: 702,
       issueBodyFetcherFn: async (_n, _cwd) => {
@@ -184,7 +184,7 @@ async function capOf(dir: string, issue: number): Promise<string | undefined> {
   try {
     let attempts = 0;
     const ctx: DriverContext = {
-      pi: makeFakePi(),
+      host: makeFakePi(),
       repoRoot: dir,
       issue: 703,
       issueBodyFetcherFn: async (_n, _cwd) => {
@@ -239,7 +239,7 @@ async function capOf(dir: string, issue: number): Promise<string | undefined> {
   try {
     let attempts = 0;
     const ctx: DriverContext = {
-      pi: makeFakePi(),
+      host: makeFakePi(),
       repoRoot: dir,
       issue: 705,
       issueBodyFetcherFn: async (_n, _cwd) => {
@@ -259,6 +259,41 @@ async function capOf(dir: string, issue: number): Promise<string | undefined> {
     );
   } finally {
     delete process.env.PI_ENSEMBLE_TRANSIENT_RETRY;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// 7. CANARY (#1151) — a rejected PRIMARY fetch never reaches the open-point
+// gate unchecked. The cycle halts before any explore dispatch and records no
+// normalised spec, so the gate cannot be silently skipped on a spec it never read.
+{
+  const dir = await makeRepo("explore-body-primary-rejected-");
+  try {
+    let exploreDispatched = false;
+    const ctx: DriverContext = {
+      host: makeFakePi(),
+      repoRoot: dir,
+      issue: 706,
+      issueBodyFetcherFn: async (_n, _cwd) => {
+        throw new Error("read ECONNRESET");
+      },
+      dispatchFn: async (_pi, spec, opts) => {
+        if (opts?.label === "explore") exploreDispatched = true;
+        if (opts?.label === "ops:handoff") return mkResult({ role: "ops", text: "Posted." });
+        return mkResult({ role: spec.role, text: "stub" });
+      },
+    };
+    await runWorkDriver(ctx);
+    const after = await readState(dir, 706);
+    assert(
+      !exploreDispatched && after?.pipelineState.normalisedSpec === undefined,
+      "primary fetch rejected: no explore dispatch and no spec reaches the open-point gate",
+    );
+    assert(
+      (await capOf(dir, 706)) === "explore-bodies-empty",
+      "primary fetch rejected: the cycle halts at explore-bodies-empty",
+    );
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
