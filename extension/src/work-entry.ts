@@ -26,18 +26,24 @@ import { trace } from "./trace.ts";
 import type { DispatchResult } from "./types.ts";
 import { groupIssues, resolvedParallelGroups } from "./work-driver-grouping.ts";
 import { runWorkDriver } from "./work-driver.ts";
-import { singleCycleQueueEntry } from "./work-queue-single-entry.ts";
-import { mergeQueueSummaryEntry } from "./work-queue-summary.ts";
+import { recordSingleCycleOutcome } from "./work-queue-single-entry.ts";
 import { renderQueueSummary, runWorkQueue } from "./work-queue.ts";
 
 const execp = promisify(exec);
+// #808's outcome recorder lives with the entry mapping it writes; re-exported.
+export { recordSingleCycleOutcome };
 
 export interface WorkInvocation {
   issues: number[];
   restart: boolean;
   /** Operator-only. Never settable from a tool — see the module docstring. */
   mergeGrant: boolean;
+  /** #66 — the invoking session has no UI; see `DriverContext.headless`. */
+  headless?: boolean;
 }
+
+/** The per-invocation flags every cycle of one `/work` call shares. */
+type CycleFlags = Pick<WorkInvocation, "restart" | "mergeGrant" | "headless">;
 
 /**
  * Parse `/work` arguments.
@@ -110,10 +116,9 @@ function runSingleIssue(
   pi: ExtensionAPI,
   repoRoot: string,
   issue: number,
-  restart: boolean,
-  mergeGrant: boolean,
+  flags: CycleFlags,
 ): Promise<import("./work-driver.ts").DriverOutcome> {
-  return runWorkDriver({ pi, repoRoot, issue, restart, mergeGrant });
+  return runWorkDriver({ pi, repoRoot, issue, ...flags });
 }
 
 /**
@@ -140,10 +145,10 @@ export async function runGroupedIssues(
   pi: ExtensionAPI,
   repoRoot: string,
   issues: number[],
-  restart: boolean,
-  mergeGrant: boolean,
+  flags: CycleFlags,
   notify: (text: string) => void,
 ): Promise<string> {
+  const { restart, mergeGrant, headless } = flags;
   const bodiesByIssue = await fetchIssueBodies(repoRoot, issues);
   const { groups, notes } = groupIssues(issues, bodiesByIssue);
   const groupList = Object.values(groups);
@@ -187,6 +192,7 @@ export async function runGroupedIssues(
             issues: groupIssueNums,
             restart,
             mergeGrant,
+            headless,
             parallelCycles: concurrency,
             invocationStartRef,
           });
@@ -248,7 +254,7 @@ export async function launchWork(
   },
 ): Promise<WorkLaunch> {
   const { repoRoot, invocation, sink } = opts;
-  const { issues, restart, mergeGrant } = invocation;
+  const { issues, restart, mergeGrant, headless } = invocation;
   const restartTag = restart ? " (restart — prior state wiped)" : "";
 
   trace(
@@ -274,7 +280,7 @@ export async function launchWork(
       ownerKind: "driver" as const,
       work: async () => {
         try {
-          await runSingleIssue(pi, repoRoot, soleIssue, restart, mergeGrant);
+          await runSingleIssue(pi, repoRoot, soleIssue, { restart, mergeGrant, headless });
           // #808 — record the outcome in the accumulating queue summary index.
           await recordSingleCycleOutcome(repoRoot, soleIssue);
           return makeResult(true, `Completed issue #${soleIssue}${restartTag}`, Date.now());
@@ -319,7 +325,7 @@ export async function launchWork(
         /* nothing we can do */
       }
     };
-    const summaryResult = await runGroupedIssues(pi, repoRoot, issues, restart, mergeGrant, notify);
+    const summaryResult = await runGroupedIssues(pi, repoRoot, issues, invocation, notify);
     // Best-effort end-of-queue summary delivery — a notification failure must
     // not turn a completed queue into an error.
     try {
@@ -381,7 +387,7 @@ export async function runDriver(
   },
 ): Promise<DispatchResult> {
   const { repoRoot, invocation, sink } = opts;
-  const { issues, restart, mergeGrant } = invocation;
+  const { issues, restart, mergeGrant, headless } = invocation;
   const restartTag = restart ? " (restart — prior state wiped)" : "";
   const startMs = Date.now();
 
@@ -395,7 +401,7 @@ export async function runDriver(
       `pi-rukas:driver-event v1 kind=work-start issue=${soleIssue} at=${new Date().toISOString()}\npi-rukas: /work driver running for issue #${soleIssue}${restartTag}. State in .pi/work-state/${soleIssue}.json — inspect it any time with /work-status.`,
     );
     try {
-      await runSingleIssue(pi, repoRoot, soleIssue, restart, mergeGrant);
+      await runSingleIssue(pi, repoRoot, soleIssue, { restart, mergeGrant, headless });
       // #808 — record the outcome in the accumulating queue summary index.
       await recordSingleCycleOutcome(repoRoot, soleIssue);
       return makeResult(
@@ -422,7 +428,7 @@ export async function runDriver(
   trace(`/work (grouped) → ${summary}`);
 
   try {
-    const summaryResult = await runGroupedIssues(pi, repoRoot, issues, restart, mergeGrant, (t) => {
+    const summaryResult = await runGroupedIssues(pi, repoRoot, issues, invocation, (t) => {
       void notifyAgent(pi, t);
     });
     return makeResult(true, summaryResult, startMs);
@@ -433,32 +439,6 @@ export async function runDriver(
       `/work driver crashed (grouped): ${(err as Error).message}`,
       startMs,
       (err as Error).message,
-    );
-  }
-}
-
-/**
- * #808 — every terminal cycle leaves its outcome in `queue-summary.json`, not
- * just grouped queue runs. Under the old whole-file overwrite a single-issue
- * cycle (which never passes through `runWorkQueue`) never wrote the file at
- * all, so `/work-status` and `/start` were blind to it — and a later grouped
- * run would have erased it anyway. Reads the terminal state the driver just
- * persisted, maps it to the same entry shape the queue builds, and MERGES it
- * into the existing index (never overwriting rows for other issues).
- *
- * Best-effort: a failure at ANY point in this path — reading the state file,
- * mapping it to an entry, merging it into the summary — must never turn a
- * completed cycle into an "unexpected throw": the driver's catch turns a
- * throw into a crash notification and a failed result, and the cycle did not
- * crash. The state file remains the authoritative record.
- */
-export async function recordSingleCycleOutcome(repoRoot: string, issue: number): Promise<void> {
-  try {
-    const entry = await singleCycleQueueEntry(repoRoot, issue);
-    if (entry) await mergeQueueSummaryEntry(repoRoot, entry);
-  } catch (err) {
-    trace(
-      `work-driver: could not record single-cycle outcome for #${issue}: ${(err as Error).message?.slice(0, 160)}`,
     );
   }
 }

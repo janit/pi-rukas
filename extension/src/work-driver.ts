@@ -24,6 +24,7 @@ import {
 } from "./work-driver-context.ts";
 import { acquireWorkDeckHeader, headerToken } from "./work-driver-deck-header.ts";
 import { countPriorStepStarts } from "./work-driver-diff.ts";
+import { markDraftPrReady } from "./work-driver-draft-pr.ts";
 import { runExplore } from "./work-driver-explore.ts";
 import { runHandoff } from "./work-driver-handoff.ts";
 import { interruptedByShutdown, sessionEnding } from "./work-driver-interrupt.ts";
@@ -95,15 +96,16 @@ async function runStep(ctx: DriverContext, state: WorkState, step: WorkStep): Pr
       return runAdversarial(ctx, state, now);
     case "commit-pr":
       return runCommitPr(ctx, state, now);
-    // A PR merged or closed under the review ends the cycle before the step.
-    case "lens-review":
+    case "lens-review": // #65 — a PR merged or closed under the review ends the cycle.
       return (await endIfPrGone(ctx, state, step)) ?? runLens(ctx, state, now);
     case "lens-fix":
       return (await endIfPrGone(ctx, state, step)) ?? runLensFix(ctx, state, now);
     case "step-back":
       return runStepBack(ctx, state, now);
-    case "ci":
-      return (await endIfPrGone(ctx, state, step)) ?? runCi(ctx, state, now);
+    case "ci": // #66 — the review is done: a draft PR is marked ready before CI.
+      return (
+        (await endIfPrGone(ctx, state, step)) ?? runCi(ctx, await markDraftPrReady(ctx, state), now)
+      );
     case "handoff":
       return runHandoff(ctx, state, now);
     case "merged":
