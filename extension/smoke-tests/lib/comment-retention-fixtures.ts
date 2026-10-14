@@ -15,18 +15,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { findLostComments } from "../../src/comment-retention.ts";
-import type { ExecFn } from "../../src/worktree.ts";
+import { realExec } from "./exec-fake.ts";
 
 export const execFileP = promisify(execFile);
 
-/** Real shell exec, matching the driver's ExecFn contract. */
-export const realExec: ExecFn = async (cmd, o) => {
-	const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-		cwd: o?.cwd,
-		maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-	});
-	return { stdout };
-};
+export { realExec };
 
 export const git = (cwd: string, args: string[]) =>
 	execFileP("git", args, { cwd });

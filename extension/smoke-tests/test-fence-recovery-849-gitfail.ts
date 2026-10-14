@@ -31,6 +31,8 @@ import { runDevelopTopological } from "../src/work-develop-topological.ts";
 import type { DriverContext } from "../src/work-driver-context.ts";
 import { type WorkState, initialState } from "../src/workflow-state.ts";
 import type { ExecFn } from "../src/worktree.ts";
+import { commandOf } from "./lib/argv-shell.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 
@@ -43,13 +45,6 @@ function assert(cond: boolean, msg: string) {
   }
 }
 
-const realExec: ExecFn = async (cmd, o) => {
-  const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-    cwd: o?.cwd,
-    maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-  });
-  return { stdout };
-};
 const git = (cwd: string, args: string[]) => execFileP("git", args, { cwd });
 const gitOut = async (cwd: string, args: string[]): Promise<string> =>
   (await git(cwd, args)).stdout.trim();
@@ -98,7 +93,7 @@ function recordingDispatch(calls: Call[]): NonNullable<DriverContext["dispatchFn
  * delegates to the real git. */
 function failingResetExec(): ExecFn {
   return async (cmd, o) => {
-    if (cmd.includes("git reset --hard")) {
+    if (commandOf(cmd, o).includes("git reset --hard")) {
       const err = new Error('Command failed: git reset --hard "<sha>"') as Error & {
         stderr: string;
       };

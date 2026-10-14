@@ -28,6 +28,7 @@ import { execp as lensExecp } from "../src/lens-exec.ts";
 import type { DriverContext } from "../src/work-driver-context.ts";
 import { execp as verifyExecp, verifyStepOutcome } from "../src/work-driver-verify.ts";
 import { initialState } from "../src/workflow-state.ts";
+import { shellOnlyEscapes } from "./lib/exec-argv-scan.ts";
 import { commitIn, fixture } from "./test-work-driver-verify-consolidated.ts";
 
 let exit = 0;
@@ -62,23 +63,6 @@ const SHELL_ONLY_SEAMS: Record<string, string> = {
   // argv-aware executor first.
   "work-driver-merged-mechanized.ts": "forge reads and the merge command only: shell strings",
 };
-
-/** Every place `source` hands a bare `promisify(exec)` on instead of calling it. */
-function shellOnlyEscapes(source: string): string[] {
-  const escapes: string[] = [];
-  const lines = source.split("\n");
-  const defRe = /\b(?:const|let)\s+(\w+)(?::\s*[\w.]+)?\s*=\s*promisify\(\s*exec\w*\s*\)/g;
-  for (const def of source.matchAll(defRe)) {
-    const use = new RegExp(`(?<!typeof\\s)\\b${def[1]}\\b(?!\\s*\\()`);
-    lines.forEach((line, i) => {
-      const code = line.trim();
-      if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) return;
-      if (/=\s*promisify\(/.test(code)) return;
-      if (use.test(code)) escapes.push(`${i + 1}: ${code}`);
-    });
-  }
-  return escapes;
-}
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>

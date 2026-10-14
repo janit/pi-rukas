@@ -15,6 +15,8 @@ import type { DriverContext } from "../src/work-driver-context.ts";
 import { nextStep } from "../src/work-driver-context.ts";
 import { type WorkEvent, initialState } from "../src/workflow-state.ts";
 import type { ExecFn } from "../src/worktree.ts";
+import { commandOf } from "./lib/argv-shell.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 
@@ -28,13 +30,6 @@ function assert(cond: boolean, msg: string) {
   }
 }
 
-const realExec: ExecFn = async (cmd, o) => {
-  const { stdout } = await execFileP("/bin/sh", ["-c", cmd], {
-    cwd: o?.cwd,
-    maxBuffer: o?.maxBuffer ?? 8 * 1024 * 1024,
-  });
-  return { stdout };
-};
 const git = (cwd: string, args: string[]) => execFileP("git", args, { cwd });
 
 const root = mkdtempSync(path.join(tmpdir(), "pi-ens-753-"));
@@ -381,7 +376,7 @@ function makeRunOne(called: boolean[], worktrees: Record<string, string>) {
   const stateRef = { current: initialState(753) };
   // Use a fake execFn that fails on `git worktree add` with a plain error.
   const failingExec: ExecFn = async (cmd, o) => {
-    if (cmd.includes("git worktree add")) {
+    if (commandOf(cmd, o).includes("git worktree add")) {
       throw new Error("fatal: invalid reference: nonexistent-ref");
     }
     return realExec(cmd, o);

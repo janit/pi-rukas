@@ -24,6 +24,7 @@ import { promisify } from "node:util";
 import type { DriverContext } from "../src/work-driver-context.ts";
 import { verifyConsolidation, verifyStepOutcome } from "../src/work-driver-verify.ts";
 import { initialState } from "../src/workflow-state.ts";
+import { realExec } from "./lib/exec-fake.ts";
 
 const execFileP = promisify(execFile);
 
@@ -102,13 +103,9 @@ async function testCommitPrGate() {
       // Use real exec — we want git commands to run against the fixture.
       verifyExecFn: async (
         cmd: string,
-        opts?: { cwd?: string; timeout?: number; maxBuffer?: number },
+        opts?: { cwd?: string; timeout?: number; maxBuffer?: number; argv?: string[] },
       ) => {
-        const { stdout, stderr } = await execFileP("/bin/sh", ["-c", cmd], {
-          cwd: opts?.cwd,
-          timeout: opts?.timeout,
-          maxBuffer: opts?.maxBuffer ?? 64 * 1024,
-        });
+        const { stdout, stderr = "" } = await realExec(cmd, opts);
         if (stderr.includes("fatal:")) throw new Error(stderr);
         return { stdout };
       },
@@ -182,13 +179,9 @@ async function testCommitPrGatePasses() {
       issueBodyFetcherFn: () => ({ stdout: "canary pass test" }),
       verifyExecFn: async (
         cmd: string,
-        opts?: { cwd?: string; timeout?: number; maxBuffer?: number },
+        opts?: { cwd?: string; timeout?: number; maxBuffer?: number; argv?: string[] },
       ) => {
-        const { stdout, stderr } = await execFileP("/bin/sh", ["-c", cmd], {
-          cwd: opts?.cwd,
-          timeout: opts?.timeout,
-          maxBuffer: opts?.maxBuffer ?? 64 * 1024,
-        });
+        const { stdout, stderr = "" } = await realExec(cmd, opts);
         if (stderr.includes("fatal:")) throw new Error(stderr);
         return { stdout };
       },
