@@ -156,6 +156,8 @@ export function registerWorkTools(pi: ExtensionAPI) {
         details: {
           started: true,
           jobId: handle.jobId,
+          // #73 — the async-result contract every report-delivering tool keeps.
+          async: true,
           issues: parsed.issues,
           mergeGrant: false,
         },
