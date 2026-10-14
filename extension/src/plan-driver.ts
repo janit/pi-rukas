@@ -24,7 +24,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { dispatchCore } from "./dispatch.ts";
-import { confirmVerbatim, settlePlanCache } from "./plan-confirm.ts";
+import { confirmVerbatim, heldForReview, settlePlanCache } from "./plan-confirm.ts";
 import { codeIdentifiersIn, draftSpec, mechanicalInventory } from "./plan-draft.ts";
 import {
   allAnglesFailedHalt,
@@ -163,7 +163,7 @@ export async function runPlanPipeline(
   // gate is ALWAYS re-run, seeded with the prior dry run's gaps as settled.
   // #1043 — an identical confirm of a fileable dry run files its reviewed spec.
   const confirmed = await confirmVerbatim(gitState, cacheInputs, input, repoRoot, finishTimings);
-  if (confirmed) return confirmed;
+  if (confirmed.result) return confirmed.result;
   const reused =
     !dryRun && gitState && cacheInputs
       ? await readInvestigationCache(gitState.cacheDir, cacheInputs)
@@ -425,6 +425,8 @@ export async function runPlanPipeline(
       : body) + planImageLinksSection(images);
 
   const resolvedGaps = gapGateEnabled ? gaps : [];
+  const held = heldForReview(input, confirmed.missReason, title, finalBody);
+  const asDryRun = dryRun || !!held;
 
   // Phase 5 — file (unless dryRun OR the cap routed to surface). D2: when
   // the cap routed to "surface" (CRITICAL remaining — the CRITICAL-only
@@ -435,7 +437,7 @@ export async function runPlanPipeline(
   // along the 500-line seam) keep the driver's orchestration visible here.
   const { issueUrl, filingFailure } = await phase5FilingFailure({
     capReason,
-    dryRun,
+    dryRun: asDryRun,
     title,
     finalBody,
     context,
@@ -448,7 +450,7 @@ export async function runPlanPipeline(
   // (the earlier "successful dry run only" rule was superseded); a filed run
   // consumes the entry (plan-confirm.ts settlePlanCache).
   await settlePlanCache(gitState, cacheInputs, {
-    dryRun,
+    dryRun: asDryRun,
     issueUrl,
     filingFailure,
     inventory: inv,
@@ -483,8 +485,9 @@ export async function runPlanPipeline(
     failedAngles,
     compacted,
     // #1043: a fileable dry run reports the digest a verbatim filing must echo.
-    reviewedDigest: dryRun && !filingFailure ? reviewedDigestOf(title, finalBody) : undefined,
+    reviewedDigest: asDryRun && !filingFailure ? reviewedDigestOf(title, finalBody) : undefined,
     investigationReused: reused ? { ageMs: reused.ageMs } : undefined,
+    reviewedSpecChanged: held,
     timings: finishTimings(),
   });
 }
