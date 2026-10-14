@@ -15,7 +15,7 @@ import { deriveCommitPrTitle } from "./work-driver-commit-title.ts";
  * the baseSha and every workstream's worktree path + committed SHA — and
  * forbids the repo root's checkout and every other .worktrees directory path.
  */
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { draftPrEnabled } from "./work-driver-draft-pr.ts";
 import { ensureIntegrateWorktree } from "./work-driver-integrate-worktree.ts";
 import { integrateWorktreePath } from "./work-driver-integrate-worktree.ts";
@@ -28,7 +28,7 @@ import { workStateFile } from "./workflow-state.ts";
 import type { ExecFn } from "./worktree.ts";
 
 export async function dispatchCommitPrFallback(
-  ctx: DriverContext,
+  ctx: CycleContext,
   entryState: WorkState,
   now: number,
   execFn: ExecFn,
@@ -129,7 +129,7 @@ export async function dispatchCommitPrFallback(
  * creation failure (the state already carries the plumb + cap).
  */
 export async function ensureIntegrateWorktreeOrHalt(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   branchName: string,
   execFn: ExecFn,

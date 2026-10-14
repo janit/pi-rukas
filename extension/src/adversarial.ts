@@ -220,8 +220,8 @@ export async function runAdversarialLoop(
     orchestratorJobId,
     ...(params.onSlow ? { onSlow: params.onSlow } : {}),
     ...(params.pi ? { pi: params.pi } : {}),
+    processGroup: params.processGroup,
   });
-
   // Re-read before every review. `fetchDiff` used to run once, before the loop,
   // so rounds 2 and 3 were prompted with pre-fix material and the reviewer had to
   // notice the staleness itself.

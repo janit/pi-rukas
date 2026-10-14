@@ -10,7 +10,7 @@
 import type { CommentEvidence } from "./comment-evidence.ts";
 import { execTree } from "./exec-tree.ts";
 import { countPrCommits, refResolves } from "./git-range.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { forgeForCycle } from "./work-driver-forge-ctx.ts";
 import { resolveMainline } from "./work-driver-git.ts";
 import type { FenceViolationRecord } from "./work-driver-scope-fence.ts";
@@ -121,7 +121,7 @@ export function judgePrIdentity(
 }
 
 export async function verifyStepOutcome(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   step: "develop" | "commit-pr",
 ): Promise<{

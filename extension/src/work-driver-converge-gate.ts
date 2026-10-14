@@ -30,7 +30,7 @@ import path from "node:path";
 import { recordCommentEvidence } from "./comment-evidence.ts";
 import { execp } from "./lens-exec.ts";
 import { trace } from "./trace.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import {
   type ConvergeVerdict,
   buildConvergeCorrectivePrompt,
@@ -47,7 +47,7 @@ import { type WorkState, appendEvent } from "./workflow-state.ts";
  * has passed. Returns the (possibly mutated) state.
  */
 export async function runConvergeGateHandler(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   dispatchFn: NonNullable<DriverContext["dispatchFn"]>,
 ): Promise<WorkState> {

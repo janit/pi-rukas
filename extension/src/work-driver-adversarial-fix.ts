@@ -43,7 +43,7 @@ import {
   withDeveloperPlumbReplies,
 } from "./work-driver-adversarial-plumb.ts";
 import type { AdversarialOutcome } from "./work-driver-adversarial-types.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { FIX_PASS_PARK_MARKER } from "./work-driver-explain-verify.ts";
 import { beginDispatch } from "./work-driver-resume.ts";
 import { verifyTimeoutMs } from "./work-driver-verify-develop-helpers.ts";
@@ -319,7 +319,7 @@ function parkFixPass(
  * the scope module).
  */
 export async function runAdversarialFixPass(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   pending: PendingFix[],
   now: number,

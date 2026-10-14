@@ -29,7 +29,7 @@ import { promisify } from "node:util";
 import { registerAsyncJobsLifecycle } from "../src/async-jobs-lifecycle.ts";
 import { clearSessionShutdownForTesting } from "../src/session-shutdown.ts";
 import type { DriverContext } from "../src/work-driver-context.ts";
-import { interruptedByShutdown } from "../src/work-driver-interrupt.ts";
+import { interruptedByShutdown } from "../src/work-driver-shutdown.ts";
 import { classifyRunningState } from "../src/work-driver-resume.ts";
 import { runWorkDriver } from "../src/work-driver.ts";
 import { initialState, readState, workStateFile, writeState } from "../src/workflow-state.ts";

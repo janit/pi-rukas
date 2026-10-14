@@ -65,7 +65,12 @@ assert(intentCriticalityEnabled(), "criticality filtering is enabled by default"
 
 // --------------------------------------------- the three documented incidents
 
-const incidents: Array<{ issue: number; intent: string; claim: string; path: string }> = [
+const incidents: Array<{
+  issue: number;
+  intent: string;
+  claim: string;
+  path: string;
+}> = [
   {
     issue: 451,
     intent: "Keep fetchAllMergedDiffs deduplication behavior in the merge report.",
@@ -91,7 +96,11 @@ for (const incident of incidents) {
     spec({
       intent: incident.intent,
       deliverables: [
-        { id: "d1", description: "implement the requested behavior", paths: [incident.path] },
+        {
+          id: "d1",
+          description: "implement the requested behavior",
+          paths: [incident.path],
+        },
       ],
       evidence: [contradicted(incident.claim, `${incident.path}:1`)],
     }),

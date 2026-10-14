@@ -285,7 +285,7 @@ const everyKindEvent: WorkEvent[] = [
     detail: "https://example.invalid/issues/1#issuecomment-1",
   },
   // S4a (#1162) — the interrupt record.
-  { kind: "interrupted", at: 1, reason: "SIGTERM" },
+  { kind: "interrupted", at: 1, reason: "signal" },
 ];
 
 // The union-derived kind set: the source of truth both directions check

@@ -39,6 +39,7 @@ import { execp } from "./lens-exec.ts";
 import { renderLensFindings } from "./lens-findings-render.ts";
 import { trace } from "./trace.ts";
 import {
+  type CycleContext,
   type DriverContext,
   MAX_REVIEW_ROUNDS,
   REVIEW_WALL_CLOCK_MS,
@@ -82,7 +83,7 @@ export function renderResidualFindings(
  * caller: no disclosure, so no routing on.
  */
 async function discloseResidualFindings(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   round: number,
   findingsBlob: string,
@@ -124,7 +125,7 @@ async function discloseResidualFindings(
  * still `lens-issues-found` and the loop goes round again into lens-fix.
  */
 export async function appendReviewCapHit(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   round: number,
   verdict: string,

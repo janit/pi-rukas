@@ -34,12 +34,14 @@ export function makeRunPhase(opts: {
   runId: string;
   signal: AbortSignal;
   orchestratorJobId: string;
+  /** #1024 — headless only: each inner child leads its own process group. */
+  processGroup?: boolean;
   /** #799 — the slow-run recorder for this loop's inner children. */
   onSlow?: OnSlowCallback;
   /** The parent pi for the slow-run watch (the PM notice half). */
   pi?: ExtensionAPI;
 }): RunPhase {
-  const { runId, signal, orchestratorJobId } = opts;
+  const { runId, signal, orchestratorJobId, processGroup } = opts;
   return async (role, tag, prompt, cwd) => {
     const deckKey = `${runId}/${tag}`;
     const label = `${role}[${tag}]`;
@@ -58,8 +60,8 @@ export function makeRunPhase(opts: {
       ...(opts.pi ? { pi: opts.pi } : {}),
       onRawEvent: slowRaw,
     });
-    // This child's own abort, so dispatch_kill <deckKey> can stop a hung
-    // round — the driver passes a loop signal that nothing ever aborts.
+    // This child's own abort, so dispatch_kill <deckKey> can stop one hung
+    // round without the loop; the loop's signal still aborts it.
     const kill = new AbortController();
     const onLoopAbort = () => kill.abort();
     if (signal.aborted) kill.abort();
@@ -69,6 +71,7 @@ export function makeRunPhase(opts: {
         { role, prompt, cwd },
         {
           signal: kill.signal,
+          processGroup,
           runId,
           tag,
           onProgress: (state) => {

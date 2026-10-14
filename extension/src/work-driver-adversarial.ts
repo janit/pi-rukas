@@ -26,7 +26,7 @@ import {
   ADVERSARIAL_PER_WS_MAX_RETRIES,
   type AdversarialOutcome,
 } from "./work-driver-adversarial-types.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { failureCauseReasonForClass } from "./work-driver-failure-taxonomy.ts";
 import { integrate, restoreRepoRoot } from "./work-driver-integrate.ts";
 import {
@@ -50,7 +50,7 @@ import type { ExecFn } from "./worktree.ts";
  * verdict, and — on approval following a lens-fix round — commits the fix.
  */
 export async function runAdversarial(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   now: number,
 ): Promise<WorkState> {

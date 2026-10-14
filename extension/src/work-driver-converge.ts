@@ -45,7 +45,7 @@
 import path from "node:path";
 import { execp } from "./lens-exec.ts";
 import { trace } from "./trace.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { porcelainPaths } from "./work-driver-doctrine.ts";
 import { normaliseDeclaredPath } from "./work-driver-verify.ts";
 import type { WorkState } from "./workflow-state.ts";
@@ -328,7 +328,7 @@ export function classifyDeliverables(
  * unreadable diff — a git failure is not evidence a deliverable is absent).
  */
 export async function runConvergeGate(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
 ): Promise<ConvergeVerdict | null> {
   if (!convergeGateEnabled()) return null;

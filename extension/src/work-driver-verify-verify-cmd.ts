@@ -23,7 +23,7 @@ import {
   extractSpecificAssertion,
   sharesAssertion,
 } from "./work-driver-consolidation-classify.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { provisionDepsHint } from "./work-driver-deps-hint.ts";
 import {
   extractAttributedTail,
@@ -61,7 +61,7 @@ function gatePerAssertion(failureText: string | undefined): string | null {
 export async function runVerifyCommandGate(opts: {
   execFn: NonNullable<DriverContext["verifyExecFn"]>;
   cmd: string;
-  ctx: DriverContext;
+  ctx: CycleContext;
   state: WorkState;
   worktrees: Record<string, string>;
   baseSha: string | undefined;

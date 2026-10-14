@@ -16,6 +16,7 @@ import { runBranch, runDevelop, stampCycleStartRef } from "./work-driver-branch-
 import { checkpointCapedDispatch } from "./work-driver-cap-checkpoint.ts";
 import { runCommitPr } from "./work-driver-commit.ts";
 import {
+  type CycleContext,
   type DriverContext,
   DriverNotImplementedError,
   STEP_ORDINAL,
@@ -27,7 +28,7 @@ import { countPriorStepStarts } from "./work-driver-diff.ts";
 import { markDraftPrReady } from "./work-driver-draft-pr.ts";
 import { runExplore } from "./work-driver-explore.ts";
 import { runHandoff } from "./work-driver-handoff.ts";
-import { interruptedByShutdown, sessionEnding } from "./work-driver-interrupt.ts";
+import { interruptIfRequested, recordStepCrash } from "./work-driver-interrupt.ts";
 import { runLens, runLensFix } from "./work-driver-lens.ts";
 import {
   clearFooter,
@@ -51,6 +52,7 @@ import {
   resumeEnabled,
 } from "./work-driver-resume-reattach.ts";
 import { reenterInterrupted } from "./work-driver-resume.ts";
+import { interruptedByShutdown, sessionEnding } from "./work-driver-shutdown.ts";
 import { routeStepOutcome } from "./work-driver-step-router.ts";
 import { runCi, runStepBack } from "./work-driver-stepback-ci.ts";
 import { deliverTerminalLine } from "./work-driver-terminal-delivery.ts";
@@ -62,7 +64,6 @@ import { type WorkEvent, appendEvent } from "./workflow-state.ts";
 import {
   type WorkState,
   type WorkStep,
-  clearInterruptRequest,
   detectInconsistencies,
   initialState,
   persistCycle,
@@ -81,7 +82,7 @@ import {
  * selection, and event-emission logic is distinct enough that a giant
  * switch becomes harder to read than a dispatch table.
  */
-async function runStep(ctx: DriverContext, state: WorkState, step: WorkStep): Promise<WorkState> {
+async function runStep(ctx: CycleContext, state: WorkState, step: WorkStep): Promise<WorkState> {
   const now = Date.now();
   trace(`work-driver: running step "${step}" for issue ${ctx.issue}`);
 
@@ -158,11 +159,9 @@ export async function runWorkDriver(ctx: DriverContext): Promise<DriverOutcome> 
   }
 }
 
-async function runWorkDriverInner(ctx: DriverContext): Promise<DriverOutcome> {
+async function runWorkDriverInner(ctx: CycleContext): Promise<DriverOutcome> {
   // PR12 — `/work N --restart`: skip readState, start fresh. Branch step
   // handles worktree leftovers at runtime; this flag only wipes state.
-  // S4a (#1162) — a new driver run supersedes any interrupt flagged earlier in this process.
-  clearInterruptRequest(ctx.repoRoot, ctx.issue);
   let state =
     ctx.restart === true
       ? initialState(ctx.issue)
@@ -301,8 +300,16 @@ async function runWorkDriverInner(ctx: DriverContext): Promise<DriverOutcome> {
   const tmpDir = await setupWorkspaceTmp(ctx.repoRoot, ctx.issue);
   trace(`work-driver: scratch dir for issue #${ctx.issue}: ${tmpDir}`);
 
+  // Headless S4 (#1024): an interrupt that arrived before the first step is
+  // recorded here, so the cycle's log says why it stopped.
+  state = await interruptIfRequested(ctx, state);
+
   let safety = 0;
   while (state.pipelineState.status === "running") {
+    // Headless S4 (#1024) — an interrupt (SIGTERM / SIGINT) is honoured at the
+    // step boundary, before any further step is paid for.
+    state = await interruptIfRequested(ctx, state);
+    if (state.pipelineState.status !== "running") break;
     safety++;
     if (safety > 64) {
       // Safety: unbounded transition loop guard.
@@ -321,7 +328,7 @@ async function runWorkDriverInner(ctx: DriverContext): Promise<DriverOutcome> {
       return { started: true };
     }
     const step = state.pipelineState.currentStep;
-    // A session shutdown is not a step failure — see work-driver-interrupt.ts.
+    // A session shutdown is not a step failure — see work-driver-shutdown.ts.
     if (interruptedByShutdown(ctx, state, step)) return { started: true };
     // Step-level lifecycle event (PR2 O1): "▶ step N/9 X started".
     const stepOrd = STEP_ORDINAL[step] ?? { num: 0, total: 9 };
@@ -340,6 +347,13 @@ async function runWorkDriverInner(ctx: DriverContext): Promise<DriverOutcome> {
       if (interruptedByShutdown(ctx, state, step)) return { started: true };
     } catch (err) {
       if (interruptedByShutdown(ctx, state, step)) return { started: true };
+      // Recorded before the abort branch: a crash that coincides with a signal
+      // is still a crash. An abort that makes the step throw is the interrupt.
+      state = recordStepCrash(state, step, err);
+      if (ctx.signal?.aborted === true) {
+        state = await interruptIfRequested(ctx, state);
+        break;
+      }
       if (err instanceof DriverNotImplementedError) {
         trace(
           `work-driver: ${err.message} — falling back to PM-driven flow not yet implemented; halting`,
@@ -366,7 +380,6 @@ async function runWorkDriverInner(ctx: DriverContext): Promise<DriverOutcome> {
         return { started: true };
       }
       // Spawn-level / unexpected error — mark aborted with the error.
-      trace(`work-driver: step "${step}" threw: ${(err as Error).message}`);
       state = {
         ...state,
         pipelineState: { ...state.pipelineState, status: "aborted" },
@@ -388,6 +401,13 @@ async function runWorkDriverInner(ctx: DriverContext): Promise<DriverOutcome> {
       );
       // The cycle ran and then aborted — its state file is the real outcome.
       return { started: true };
+    }
+    // Headless S4 (#1024): an interrupt that fired during the step ends the
+    // cycle here, without routing. The step's events stay in the log (they
+    // happened); the router never sees its outcome, so no handoff follows.
+    if (ctx.signal?.aborted === true) {
+      state = await interruptIfRequested(ctx, state);
+      break;
     }
     // Route step outcome (work-driver-step-router.ts); `retry: true` means
     // the router already persisted state and we re-enter.

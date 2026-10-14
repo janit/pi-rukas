@@ -19,7 +19,7 @@ import { execTree } from "./exec-tree.ts";
 import { prRange, refResolves } from "./git-range.ts";
 import { execp as groupExecp } from "./lens-exec.ts";
 import { trace } from "./trace.ts";
-import type { DriverContext } from "./work-driver-context.ts";
+import type { CycleContext, DriverContext } from "./work-driver-context.ts";
 import { resolveMainline } from "./work-driver-git.ts";
 import type { ConsolidationVerdict } from "./workflow-state-consolidation.ts";
 import type { WorkState } from "./workflow-state.ts";
@@ -126,7 +126,7 @@ const VALID_SHA_RE = /^[0-9a-f]{40}$/;
  * as touched → uncovered.
  */
 async function workstreamTouchedSet(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
   id: string,
   execFn?: (cmd: string, o?: { cwd?: string; maxBuffer?: number }) => Promise<{ stdout: string }>,
@@ -264,7 +264,7 @@ async function workstreamTouchedSet(
  * there; regression-asserted).
  */
 export async function verifyConsolidation(
-  ctx: DriverContext,
+  ctx: CycleContext,
   state: WorkState,
 ): Promise<{
   missing: Array<{ id: string; paths: string[] }>;

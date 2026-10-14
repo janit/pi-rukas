@@ -42,6 +42,8 @@ export async function runLensChild(opts: {
     diff: string;
     cwd?: string;
     signal?: AbortSignal;
+    /** #1024 — headless only: the child leads its own process group. */
+    processGroup?: boolean;
     evidence?: string;
     /** #1105 — the branch's prior-findings DATA block (lens-residuals.ts). */
     priorFindings?: string;
@@ -192,6 +194,7 @@ export async function runLensChild(opts: {
             // 25-min inactivity watchdog (inactivityTimeoutMs). No per-role
             // timeout exists; liveness, not wall clock, is the real signal.
             signal: kill.signal,
+            processGroup: runOpts.processGroup,
             onProgress: (state) => {
               dispatchDeck.updateEntry(deckKey, state);
               feedSlowProgress(deckKey, state);

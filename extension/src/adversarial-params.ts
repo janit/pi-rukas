@@ -67,6 +67,8 @@ export type AdversarialLoopParams = {
    * the parent pi for their slow-run watch (the PM notice half). */
   onSlow?: OnSlowCallback;
   pi?: ExtensionAPI;
+  /** #1024 — headless only: each inner child leads its own process group. */
+  processGroup?: boolean;
   /** #912 — caller-supplied branch for the review-ledger write (the driver
    * worktrees are detached, so `git rev-parse --abbrev-ref HEAD` cannot
    * recover it). When absent the writer recovers the branch from `HEAD`
