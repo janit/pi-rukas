@@ -304,6 +304,10 @@ A timed-out explore produced an empty reply, and the driver read that as "explor
 
 The gate now requires the PR to be **open** and to have this cycle's branch as its head. Previously it only checked that `gh pr view <N>` did not error, which proved a PR with that number exists — not that it belongs to this cycle. If you see this, the ops reply's `pr:` marker named a PR from a different branch, or one that is already closed or merged. Check `gh pr list --head <branch>`.
 
+### The PR was merged or closed while `/work` was still reviewing it
+
+The driver reads the cycle's PR before lens-review, lens-fix, ci, and before it pushes a lens fix. **Merged** by a person: the cycle ends `merged`, and the terminal line says *merged by someone else during <step>* — the driver merged nothing and pushes nothing further; unpushed work stays in the cycle's worktree(s). **Closed** without a merge: it parks as `verify-failed:<step>` with a `[pr-not-open]` failure. If the PR's state cannot be read, the step runs as before. The review's residual findings are posted to the recorded PR number (a merged PR still takes comments); if that fails they go to the issue, and `/work-status` shows a `lens-residuals-post-failed` event saying where they went.
+
 ### `/work` halts at the branch step naming the mainline
 
 The branch step recorded whatever branch `repoRoot` was on, and that value becomes the branch the cycle force-pushes to. If an ops child creates the branch and then returns `repoRoot` to `main`, the cycle would have adopted `main`. It now halts. Re-run with `--restart` after checking `git -C <repo> branch --show-current`.
@@ -971,6 +975,14 @@ Without `--restart`, re-invoking `/work N` on a terminal-state file now emits a 
 The park reuses the `verify-failed:develop` cap, but it is not the outcome-verification gate: the cap text now opens *"the adversarial fix pass did not clear"* instead of *"the driver's outcome-verification gate rejected the develop step's "done" claim"*, and no longer suggests `PI_ENSEMBLE_VERIFY=0`, which the fix pass's own checks do not consult. The same holds for a second commit-pr refused because the cycle's PR is no longer open (`verify-failed:commit-pr`), and a `verify-failed` cap with no recorded evidence says the reason was not recorded rather than claiming the driver ran the checks.
 
 **Fix:** restore the named lines in the workstream's worktree, or reword them in place, and re-run. `PI_ENSEMBLE_COMMENT_RETENTION=0` disables the check.
+
+### "repoRoot was NOT restored: the discarded state could not be saved"
+
+**Symptom:** a failed consolidation, integration, lens-fix integration or handoff consolidation ends with *"repoRoot was NOT restored: the discarded state could not be saved (`git diff` failed: …), so nothing was reset or checked out — the tree at <path> is left exactly as it was"*. The next `/work` then stops at the branch step with `repo-root-residue`.
+
+**Why:** before a restore resets the repo root it saves what it would discard to `restored-state-*.diff` in the cycle's scratch dir. When that save fails, the root is the only copy of the change, so the restore no longer resets it. Previously a failed save was treated like "nothing to save" and the tree was reset anyway.
+
+**Fix:** the error in the message names the git command that failed and its stderr; fix that first. Then recover the change at the named path by hand (`git status`, `git diff`, `git diff --cached`, and `git cherry-pick --abort` if one is in progress), and clear the root before re-running.
 
 ### `worktree-dirty-preremove` — the branch step refuses a worktree that holds uncommitted work (#475)
 
