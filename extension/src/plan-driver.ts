@@ -425,7 +425,6 @@ export async function runPlanPipeline(
       : body) + planImageLinksSection(images);
 
   const resolvedGaps = gapGateEnabled ? gaps : [];
-  // #74 — a digest-carrying confirm whose re-drafted spec changed is held as a dry run.
   const held = heldForReview(input, confirmed.missReason, title, finalBody);
   const asDryRun = dryRun || !!held;
 
