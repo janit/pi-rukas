@@ -47,6 +47,7 @@ export interface PlanResultFields {
   reviewedDigest?: string;
   investigationReused?: { ageMs: number };
   filedFromDryRun?: { ageMs: number };
+  reviewedSpecChanged?: { reason: string };
 }
 
 export function buildPlanResult(f: PlanResultFields): PlanResult {
@@ -67,6 +68,7 @@ export function buildPlanResult(f: PlanResultFields): PlanResult {
     reviewedDigest: f.reviewedDigest,
     investigationReused: f.investigationReused,
     filedFromDryRun: f.filedFromDryRun,
+    reviewedSpecChanged: f.reviewedSpecChanged,
     timings: f.timings,
   };
 }

@@ -24,7 +24,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { dispatchCore } from "./dispatch.ts";
-import { confirmVerbatim, settlePlanCache } from "./plan-confirm.ts";
+import { confirmVerbatim, heldForReview, settlePlanCache } from "./plan-confirm.ts";
 import { codeIdentifiersIn, draftSpec, mechanicalInventory } from "./plan-draft.ts";
 import {
   allAnglesFailedHalt,
@@ -45,6 +45,7 @@ import {
   settledGapsSection,
 } from "./plan-gaps.ts";
 import { type CarriedCritical, gapGatePrompt, gapGateVerifyPrompt } from "./plan-gate-prompt.ts";
+import { loadPlanImages, planImageLinksSection } from "./plan-images.ts";
 import {
   type InvestigationResult,
   PLAN_DISPATCH_TIMEOUT_MS,
@@ -76,6 +77,7 @@ import {
 } from "./plan-validate.ts";
 import { type ResolvedDecision, buildResolvedDecisions } from "./plan-writeback.ts";
 import { trace } from "./trace.ts";
+import { issueImagesSection, withIssueImages } from "./work-driver-issue-images.ts";
 
 const GAP_GATE_MAX_ITERATIONS = 2;
 
@@ -92,7 +94,14 @@ export async function runPlanPipeline(
   input: PlanDriverInput,
   repoRoot: string,
 ): Promise<PlanResult> {
-  const dispatch: PlanDispatchFn = getPlanDispatchOverride() ?? dispatchCore;
+  // The source issue's images (plan-images.ts): with every child, links in the body.
+  const images = await loadPlanImages();
+  const imagesSection = issueImagesSection(images, "planChild");
+  const dispatch: PlanDispatchFn = withIssueImages(
+    getPlanDispatchOverride() ?? dispatchCore,
+    images,
+    imagesSection,
+  );
   const { descriptor, context, dryRun } = input;
   const type = classifyPlanType(descriptor, input.type);
   const depth = input.depth ?? 0;
@@ -154,7 +163,7 @@ export async function runPlanPipeline(
   // gate is ALWAYS re-run, seeded with the prior dry run's gaps as settled.
   // #1043 — an identical confirm of a fileable dry run files its reviewed spec.
   const confirmed = await confirmVerbatim(gitState, cacheInputs, input, repoRoot, finishTimings);
-  if (confirmed) return confirmed;
+  if (confirmed.result) return confirmed.result;
   const reused =
     !dryRun && gitState && cacheInputs
       ? await readInvestigationCache(gitState.cacheDir, cacheInputs)
@@ -411,11 +420,13 @@ export async function runPlanPipeline(
   // residual disclosure. Append it HERE, before fileIssue, so the single
   // filing pass below sees the final body.
   const finalBody =
-    residualForDisclosure.length > 0
+    (residualForDisclosure.length > 0
       ? `${body}\n\n${residualGapsSection(residualForDisclosure)}`
-      : body;
+      : body) + planImageLinksSection(images);
 
   const resolvedGaps = gapGateEnabled ? gaps : [];
+  const held = heldForReview(input, confirmed.missReason, title, finalBody);
+  const asDryRun = dryRun || !!held;
 
   // Phase 5 — file (unless dryRun OR the cap routed to surface). D2: when
   // the cap routed to "surface" (CRITICAL remaining — the CRITICAL-only
@@ -426,7 +437,7 @@ export async function runPlanPipeline(
   // along the 500-line seam) keep the driver's orchestration visible here.
   const { issueUrl, filingFailure } = await phase5FilingFailure({
     capReason,
-    dryRun,
+    dryRun: asDryRun,
     title,
     finalBody,
     context,
@@ -439,7 +450,7 @@ export async function runPlanPipeline(
   // (the earlier "successful dry run only" rule was superseded); a filed run
   // consumes the entry (plan-confirm.ts settlePlanCache).
   await settlePlanCache(gitState, cacheInputs, {
-    dryRun,
+    dryRun: asDryRun,
     issueUrl,
     filingFailure,
     inventory: inv,
@@ -474,8 +485,9 @@ export async function runPlanPipeline(
     failedAngles,
     compacted,
     // #1043: a fileable dry run reports the digest a verbatim filing must echo.
-    reviewedDigest: dryRun && !filingFailure ? reviewedDigestOf(title, finalBody) : undefined,
+    reviewedDigest: asDryRun && !filingFailure ? reviewedDigestOf(title, finalBody) : undefined,
     investigationReused: reused ? { ageMs: reused.ageMs } : undefined,
+    reviewedSpecChanged: held,
     timings: finishTimings(),
   });
 }
